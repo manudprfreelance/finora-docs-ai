@@ -7,6 +7,8 @@ import {
 import {
   findCustomerByDni,
   getCustomerAccounts,
+  getCustomerLoans,
+  getCustomerMovements,
 } from "@/lib/mock-bank-data";
 
 function requiresAccount(documentType: DocumentType): boolean {
@@ -22,6 +24,14 @@ function requiresDateRange(documentType: DocumentType): boolean {
     documentType === "account_statement" ||
     documentType === "position_statement"
   );
+}
+
+function requiresLoan(documentType: DocumentType): boolean {
+  return documentType === "loan_amortization";
+}
+
+function requiresMovement(documentType: DocumentType): boolean {
+  return documentType === "swift_confirmation";
 }
 
 export function calculateMissingFields(
@@ -56,6 +66,20 @@ export function calculateMissingFields(
     if (!hasDateRange) {
       missingFields.push("dateRange");
     }
+  }
+
+  if (
+    requiresLoan(request.documentType) &&
+    !request.selectedLoan
+  ) {
+    missingFields.push("loan");
+  }
+
+  if (
+    requiresMovement(request.documentType) &&
+    !request.selectedMovement
+  ) {
+    missingFields.push("movement");
   }
 
   return missingFields;
@@ -98,20 +122,35 @@ export function resolveCustomerFromDni(
       },
       availableAccounts: [],
       selectedAccount: null,
+      availableLoans: [],
+      selectedLoan: null,
+      availableMovements: [],
+      selectedMovement: null,
     });
   }
 
   const accounts = getCustomerAccounts(customer.customerId);
+  const loans = getCustomerLoans(customer.customerId);
+  const movements = getCustomerMovements(customer.customerId);
 
   return updateRequestStatus({
     ...request,
+
     customer: {
       customerId: customer.customerId,
       dni: customer.dni,
       name: customer.name,
     },
+
     availableAccounts: accounts,
     selectedAccount:
-      accounts.length === 1 ? accounts[0] : request.selectedAccount,
+      accounts.length === 1 ? accounts[0] : null,
+
+    availableLoans: loans,
+    selectedLoan:
+      loans.length === 1 ? loans[0] : null,
+
+    availableMovements: movements,
+    selectedMovement: null,
   });
 }

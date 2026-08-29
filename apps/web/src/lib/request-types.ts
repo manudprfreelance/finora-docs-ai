@@ -26,6 +26,22 @@ export interface CustomerAccount {
   accountType: string;
 }
 
+export interface CustomerLoan {
+  loanId: string;
+  loanName: string;
+  maskedLoanNumber: string;
+  loanType: string;
+}
+
+export interface BankMovement {
+  movementId: string;
+  accountId: string;
+  date: string;
+  description: string;
+  amount: number;
+  currency: string;
+}
+
 export interface DateRange {
   from: string | null;
   to: string | null;
@@ -36,7 +52,9 @@ export type MissingField =
   | "name"
   | "documentType"
   | "account"
-  | "dateRange";
+  | "dateRange"
+  | "loan"
+  | "movement";
 
 export interface DocumentRequest {
   /**
@@ -46,9 +64,6 @@ export interface DocumentRequest {
 
   /**
    * Customer identity resolved during the conversation.
-   *
-   * In the final architecture this information can be completed
-   * or validated against the bank's customer database.
    */
   customer: CustomerIdentity;
 
@@ -58,17 +73,34 @@ export interface DocumentRequest {
   documentType: DocumentType;
 
   /**
-   * Accounts retrieved for the identified customer.
-   *
-   * These should eventually come from the backend/database,
-   * not from values hardcoded in the frontend.
+   * Accounts retrieved from the bank data source.
    */
   availableAccounts: CustomerAccount[];
 
   /**
-   * Account selected or confirmed during the conversation.
+   * Account selected or inferred for the request.
    */
   selectedAccount: CustomerAccount | null;
+
+  /**
+   * Loans retrieved for the identified customer.
+   */
+  availableLoans: CustomerLoan[];
+
+  /**
+   * Loan selected or inferred for the request.
+   */
+  selectedLoan: CustomerLoan | null;
+
+  /**
+   * Movements retrieved for the relevant account.
+   */
+  availableMovements: BankMovement[];
+
+  /**
+   * Movement selected or inferred for a SWIFT confirmation.
+   */
+  selectedMovement: BankMovement | null;
 
   /**
    * Requested document period, when applicable.
@@ -76,8 +108,7 @@ export interface DocumentRequest {
   dateRange: DateRange | null;
 
   /**
-   * Information that still needs to be obtained before
-   * the request can be confirmed.
+   * Information still required before confirmation.
    */
   missingFields: MissingField[];
 
@@ -96,8 +127,13 @@ export const createEmptyDocumentRequest = (): DocumentRequest => ({
   documentType: "unknown",
 
   availableAccounts: [],
-
   selectedAccount: null,
+
+  availableLoans: [],
+  selectedLoan: null,
+
+  availableMovements: [],
+  selectedMovement: null,
 
   dateRange: null,
 
