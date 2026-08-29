@@ -1,4 +1,5 @@
 import { FinoraLogo } from "@/components/FinoraLogo";
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -20,9 +21,12 @@ export default function Home() {
             traceable and powered by agentic AI.
           </p>
 
-          <button className="mt-8 rounded-xl bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400">
+          <Link
+            href="/request"
+            className="mt-8 inline-block rounded-xl bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400"
+          >
             Start a document request
-          </button>
+          </Link>
         </section>
       </div>
     </main>
