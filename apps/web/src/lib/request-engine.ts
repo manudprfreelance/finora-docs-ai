@@ -4,6 +4,11 @@ import {
   MissingField,
 } from "@/lib/request-types";
 
+import {
+  findCustomerByDni,
+  getCustomerAccounts,
+} from "@/lib/mock-bank-data";
+
 function requiresAccount(documentType: DocumentType): boolean {
   return (
     documentType === "account_statement" ||
@@ -75,4 +80,38 @@ export function updateRequestStatus(
         ? "ready_for_confirmation"
         : "collecting_information",
   };
+}
+
+export function resolveCustomerFromDni(
+  request: DocumentRequest,
+  dni: string,
+): DocumentRequest {
+  const customer = findCustomerByDni(dni);
+
+  if (!customer) {
+    return updateRequestStatus({
+      ...request,
+      customer: {
+        customerId: null,
+        dni: dni.trim().toUpperCase(),
+        name: null,
+      },
+      availableAccounts: [],
+      selectedAccount: null,
+    });
+  }
+
+  const accounts = getCustomerAccounts(customer.customerId);
+
+  return updateRequestStatus({
+    ...request,
+    customer: {
+      customerId: customer.customerId,
+      dni: customer.dni,
+      name: customer.name,
+    },
+    availableAccounts: accounts,
+    selectedAccount:
+      accounts.length === 1 ? accounts[0] : request.selectedAccount,
+  });
 }
