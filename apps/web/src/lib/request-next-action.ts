@@ -21,7 +21,7 @@ export function getNextAction(
     return {
       type: "ask_dni",
       message:
-        "Please provide your DNI so I can identify your profile.",
+        "Por favor, indícame tu DNI para poder identificar tu perfil.",
     };
   }
 
@@ -29,7 +29,7 @@ export function getNextAction(
     return {
       type: "ask_document_type",
       message:
-        "What document do you need? You can describe it in your own words.",
+        "¿Qué documento necesitas? Puedes explicármelo con tus propias palabras.",
     };
   }
 
@@ -44,14 +44,14 @@ export function getNextAction(
 
       return {
         type: "ask_account",
-        message: `I found several accounts associated with your profile: ${accountOptions}. Which one should I use for this request?`,
+        message: `He encontrado varias cuentas asociadas a tu perfil: ${accountOptions}. ¿Cuál quieres utilizar para esta solicitud?`,
       };
     }
 
     return {
       type: "ask_account",
       message:
-        "I still need to identify which account should be used for this request.",
+        "Necesito identificar qué cuenta debemos utilizar para esta solicitud.",
     };
   }
 
@@ -66,14 +66,14 @@ export function getNextAction(
 
       return {
         type: "ask_loan",
-        message: `I found several loans associated with your profile: ${loanOptions}. Which loan should I use for the amortization schedule?`,
+        message: `He encontrado varios préstamos asociados a tu perfil: ${loanOptions}. ¿Para cuál necesitas el cuadro de amortización?`,
       };
     }
 
     return {
       type: "ask_loan",
       message:
-        "I still need to identify which loan should be used for the amortization schedule.",
+        "Necesito identificar para qué préstamo necesitas el cuadro de amortización.",
     };
   }
 
@@ -82,14 +82,14 @@ export function getNextAction(
       return {
         type: "ask_movement",
         message:
-          "Which transaction do you need the SWIFT confirmation for? You can identify it by date, amount or beneficiary.",
+          "¿De qué operación necesitas la confirmación SWIFT? Puedes indicarme la fecha, el importe o el beneficiario.",
       };
     }
 
     return {
       type: "ask_movement",
       message:
-        "I could not identify the transaction required for the SWIFT confirmation.",
+        "No he podido identificar la operación necesaria para generar la confirmación SWIFT.",
     };
   }
 
@@ -97,13 +97,13 @@ export function getNextAction(
     return {
       type: "ask_date_range",
       message:
-        "What date range should be included in the document?",
+        "¿Qué periodo de fechas quieres que incluya el documento?",
     };
   }
 
   return {
     type: "confirm_request",
     message:
-      "I have all the required information. Please review and confirm the request.",
+      "Ya tengo toda la información necesaria. Revisa los datos y confirma la solicitud.",
   };
 }
