@@ -41,10 +41,16 @@ export function calculateMissingFields(
 
   if (!request.customer.dni?.trim()) {
     missingFields.push("dni");
-  }
+  } else if (
+    request.customer.resolutionStatus !== "resolved"
+  ) {
+    /*
+     * Once a DNI has been provided, Finora must identify the
+     * customer before continuing with any bank-specific data.
+     */
+    missingFields.push("customer");
 
-  if (!request.customer.name?.trim()) {
-    missingFields.push("name");
+    return missingFields;
   }
 
   if (request.documentType === "unknown") {
@@ -110,20 +116,27 @@ export function resolveCustomerFromDni(
   request: DocumentRequest,
   dni: string,
 ): DocumentRequest {
-  const customer = findCustomerByDni(dni);
+  const normalizedDni = dni.trim().toUpperCase();
+
+  const customer = findCustomerByDni(normalizedDni);
 
   if (!customer) {
     return updateRequestStatus({
       ...request,
+
       customer: {
         customerId: null,
-        dni: dni.trim().toUpperCase(),
+        dni: normalizedDni,
         name: null,
+        resolutionStatus: "not_found",
       },
+
       availableAccounts: [],
       selectedAccount: null,
+
       availableLoans: [],
       selectedLoan: null,
+
       availableMovements: [],
       selectedMovement: null,
     });
@@ -140,6 +153,7 @@ export function resolveCustomerFromDni(
       customerId: customer.customerId,
       dni: customer.dni,
       name: customer.name,
+      resolutionStatus: "resolved",
     },
 
     availableAccounts: accounts,

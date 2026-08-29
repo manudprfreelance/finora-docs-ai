@@ -1,258 +1,389 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 
-type DocumentType =
-  | "account_statement"
-  | "loan_amortization"
-  | "swift_confirmation"
-  | "unknown";
+import {
+  DocumentRequest,
+  DocumentType,
+} from "@/lib/request-types";
 
-type AnalysisResult = {
-  type: DocumentType;
-  title: string;
-  description: string;
-};
+interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+}
 
-function analyzeRequest(request: string): AnalysisResult {
-  const normalized = request.toLowerCase();
+interface AgentApiResponse {
+  receivedMessage: string;
 
-  if (
-    normalized.includes("extracto") ||
-    normalized.includes("statement") ||
-    normalized.includes("posición") ||
-    normalized.includes("posicion")
-  ) {
-    return {
-      type: "account_statement",
-      title: "Account statement",
-      description:
-        "The request appears to be for an account statement or position statement.",
-    };
-  }
+  agent: {
+    mode: string;
+    provider: string;
+    model: string;
+  };
 
-  if (
-    normalized.includes("amortización") ||
-    normalized.includes("amortizacion") ||
-    normalized.includes("préstamo") ||
-    normalized.includes("prestamo") ||
-    normalized.includes("loan")
-  ) {
-    return {
-      type: "loan_amortization",
-      title: "Loan amortization schedule",
-      description:
-        "The request appears to be for a loan amortization schedule.",
-    };
-  }
+  requestState: DocumentRequest;
 
-  if (
-    normalized.includes("swift") ||
-    normalized.includes("transferencia internacional") ||
-    normalized.includes("international transfer")
-  ) {
-    return {
-      type: "swift_confirmation",
-      title: "SWIFT payment confirmation",
-      description:
-        "The request appears to be for confirmation of an international SWIFT payment.",
-    };
-  }
-
-  return {
-    type: "unknown",
-    title: "Document type not identified",
-    description:
-      "We need a little more information before we can identify the requested document.",
+  nextAction: {
+    type: string;
+    message: string;
   };
 }
 
+const documentTypeLabels: Record<DocumentType, string> = {
+  account_statement: "Extracto de cuenta",
+  position_statement: "Estado de posición",
+  loan_amortization: "Cuadro de amortización",
+  swift_confirmation: "Confirmación SWIFT",
+  unknown: "Sin identificar",
+};
+
+const missingFieldLabels: Record<string, string> = {
+  dni: "DNI",
+  name: "Nombre",
+  documentType: "Tipo de documento",
+  account: "Cuenta",
+  dateRange: "Periodo",
+  loan: "Préstamo",
+  movement: "Operación",
+};
+
 export default function RequestPage() {
-  const [request, setRequest] = useState("");
-  const [submittedRequest, setSubmittedRequest] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 1,
+      role: "assistant",
+      content:
+        "Hola, soy Finora. Dime qué documento bancario necesitas y te ayudaré a solicitarlo.",
+    },
+  ]);
 
-  const handleContinue = () => {
-    const cleanRequest = request.trim();
+  const [input, setInput] = useState("");
 
-    if (!cleanRequest) {
+  const [requestState, setRequestState] =
+    useState<DocumentRequest | null>(null);
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    const message = input.trim();
+
+    if (!message || isLoading) {
       return;
     }
 
-    setSubmittedRequest(cleanRequest);
-    setAnalysis(null);
-  };
+    const userMessage: ChatMessage = {
+      id: Date.now(),
+      role: "user",
+      content: message,
+    };
 
-  const handleEdit = () => {
-    setSubmittedRequest(null);
-    setAnalysis(null);
-  };
+    setMessages((currentMessages) => [
+      ...currentMessages,
+      userMessage,
+    ]);
 
-  const handleAnalyze = () => {
-    if (!submittedRequest) {
-      return;
+    setInput("");
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message,
+          requestState,
+        }),
+      });
+
+      const data = (await response.json()) as
+        | AgentApiResponse
+        | { error: string };
+
+      if (!response.ok || "error" in data) {
+        throw new Error(
+          "error" in data
+            ? data.error
+            : "No se ha podido procesar la solicitud.",
+        );
+      }
+
+      setRequestState(data.requestState);
+
+      const assistantMessage: ChatMessage = {
+        id: Date.now() + 1,
+        role: "assistant",
+        content: data.nextAction.message,
+      };
+
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        assistantMessage,
+      ]);
+    } catch (requestError) {
+      const errorMessage =
+        requestError instanceof Error
+          ? requestError.message
+          : "Se ha producido un error inesperado.";
+
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
+  }
 
-    setAnalysis(analyzeRequest(submittedRequest));
-  };
+  function resetConversation() {
+    setMessages([
+      {
+        id: Date.now(),
+        role: "assistant",
+        content:
+          "Hola, soy Finora. Dime qué documento bancario necesitas y te ayudaré a solicitarlo.",
+      },
+    ]);
+
+    setRequestState(null);
+    setInput("");
+    setError(null);
+  }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-16">
-        <section className="w-full max-w-3xl">
-          <p className="text-sm font-medium uppercase tracking-[0.3em] text-emerald-400">
-            Finora Docs AI
-          </p>
-
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl">
-            Start a document request
-          </h1>
-
-          <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-300">
-            Tell us what document you need. Finora Docs AI will guide you
-            through the request securely and step by step.
-          </p>
-
-          {!submittedRequest ? (
-            <div className="mt-10">
-              <label
-                htmlFor="request"
-                className="text-sm font-medium text-slate-200"
-              >
-                What document do you need?
-              </label>
-
-              <textarea
-                id="request"
-                name="request"
-                rows={6}
-                value={request}
-                onChange={(event) => setRequest(event.target.value)}
-                placeholder="For example: I need the statement for my account for February 2026."
-                className="mt-3 w-full resize-none rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20"
-              />
-
-              <div className="mt-3 flex items-center justify-between gap-6">
-                <p className="text-sm text-slate-500">
-                  Describe your request naturally. You do not need to know the
-                  exact document name.
+    <main className="min-h-screen bg-[#020817] px-5 py-10 text-white">
+      <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="flex min-h-[720px] flex-col overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/60">
+          <header className="border-b border-slate-800 px-6 py-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-emerald-400">
+                  Finora Docs AI
                 </p>
 
-                <span className="shrink-0 text-sm text-slate-600">
-                  {request.length} characters
-                </span>
+                <h1 className="mt-1 text-2xl font-semibold">
+                  Solicitud de documentos
+                </h1>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Cuéntame qué necesitas con tus propias palabras.
+                </p>
               </div>
 
               <button
                 type="button"
-                onClick={handleContinue}
-                disabled={!request.trim()}
-                className="mt-6 rounded-xl bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                onClick={resetConversation}
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
               >
-                Continue
+                Nueva solicitud
               </button>
             </div>
-          ) : (
-            <div className="mt-10 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <div className="flex items-center gap-3">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          </header>
 
-                <p className="text-sm font-medium uppercase tracking-[0.2em] text-emerald-400">
-                  {analysis ? "Request analyzed" : "Request received"}
+          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-8">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${
+                  message.role === "user"
+                    ? "justify-end"
+                    : "justify-start"
+                }`}
+              >
+                <div
+                  className={`max-w-[82%] rounded-2xl px-5 py-4 text-[15px] leading-7 ${
+                    message.role === "user"
+                      ? "bg-emerald-500 text-slate-950"
+                      : "border border-slate-800 bg-slate-900 text-slate-100"
+                  }`}
+                >
+                  {message.content}
+                </div>
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4 text-sm text-slate-400">
+                  Finora está procesando tu solicitud...
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-slate-800 p-5">
+            {error && (
+              <div className="mb-4 rounded-xl border border-red-900/70 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
+
+            <form
+              onSubmit={handleSubmit}
+              className="flex gap-3"
+            >
+              <input
+                value={input}
+                onChange={(event) =>
+                  setInput(event.target.value)
+                }
+                disabled={isLoading}
+                placeholder="Escribe tu mensaje..."
+                autoComplete="off"
+                className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-950 px-5 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500 disabled:opacity-60"
+              />
+
+              <button
+                type="submit"
+                disabled={isLoading || !input.trim()}
+                className="rounded-2xl bg-emerald-500 px-6 py-4 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Enviar
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <aside className="rounded-3xl border border-slate-800 bg-slate-950/60 p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Solicitud actual
+          </p>
+
+          {!requestState ? (
+            <p className="mt-5 text-sm leading-6 text-slate-500">
+              La información aparecerá aquí a medida que Finora entienda tu solicitud.
+            </p>
+          ) : (
+            <div className="mt-6 space-y-6">
+              <div>
+                <p className="text-xs text-slate-500">
+                  Documento
+                </p>
+
+                <p className="mt-1 font-medium">
+                  {
+                    documentTypeLabels[
+                      requestState.documentType
+                    ]
+                  }
                 </p>
               </div>
 
-              {!analysis ? (
-                <>
-                  <h2 className="mt-5 text-2xl font-semibold">
-                    We&apos;re ready to analyze your request
-                  </h2>
+              <div>
+                <p className="text-xs text-slate-500">
+                  Cliente
+                </p>
 
-                  <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-5">
-                    <p className="text-sm text-slate-500">Your request</p>
+                <p className="mt-1 font-medium">
+                  {requestState.customer.name ??
+                    "Pendiente de identificar"}
+                </p>
 
-                    <p className="mt-2 leading-7 text-slate-200">
-                      {submittedRequest}
-                    </p>
-                  </div>
+                {requestState.customer.dni && (
+                  <p className="mt-1 text-sm text-slate-400">
+                    DNI {requestState.customer.dni}
+                  </p>
+                )}
+              </div>
 
-                  <p className="mt-5 text-sm leading-6 text-slate-400">
-                    Finora Docs AI will identify the document type and
-                    determine what information is required to process it.
+              <div>
+                <p className="text-xs text-slate-500">
+                  Cuenta
+                </p>
+
+                <p className="mt-1 font-medium">
+                  {requestState.selectedAccount
+                    ? `${requestState.selectedAccount.accountName} ${requestState.selectedAccount.maskedAccountNumber}`
+                    : "Pendiente"}
+                </p>
+              </div>
+
+              {requestState.documentType ===
+                "loan_amortization" && (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Préstamo
                   </p>
 
-                  <div className="mt-6 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handleEdit}
-                      className="rounded-xl border border-slate-700 px-5 py-3 font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
-                    >
-                      Edit request
-                    </button>
+                  <p className="mt-1 font-medium">
+                    {requestState.selectedLoan
+                      ? `${requestState.selectedLoan.loanName} ${requestState.selectedLoan.maskedLoanNumber}`
+                      : "Pendiente"}
+                  </p>
+                </div>
+              )}
 
-                    <button
-                      type="button"
-                      onClick={handleAnalyze}
-                      className="rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400"
-                    >
-                      Analyze request
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <h2 className="mt-5 text-2xl font-semibold">
-                    {analysis.title}
-                  </h2>
-
-                  <p className="mt-3 leading-7 text-slate-300">
-                    {analysis.description}
+              {requestState.documentType ===
+                "swift_confirmation" && (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Operación
                   </p>
 
-                  <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/70 p-5">
-                    <p className="text-sm text-slate-500">
-                      Original request
-                    </p>
+                  <p className="mt-1 font-medium">
+                    {requestState.selectedMovement
+                      ? `${requestState.selectedMovement.date} · ${requestState.selectedMovement.amount} ${requestState.selectedMovement.currency}`
+                      : "Pendiente"}
+                  </p>
+                </div>
+              )}
 
-                    <p className="mt-2 leading-7 text-slate-200">
-                      {submittedRequest}
-                    </p>
+              <div>
+                <p className="text-xs text-slate-500">
+                  Periodo
+                </p>
+
+                <p className="mt-1 font-medium">
+                  {requestState.dateRange?.from &&
+                  requestState.dateRange?.to
+                    ? `${requestState.dateRange.from} → ${requestState.dateRange.to}`
+                    : "Pendiente"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-slate-500">
+                  Estado
+                </p>
+
+                <p className="mt-1 font-medium text-emerald-400">
+                  {requestState.status ===
+                  "ready_for_confirmation"
+                    ? "Lista para confirmar"
+                    : "Recopilando información"}
+                </p>
+              </div>
+
+              {requestState.missingFields.length > 0 && (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Información pendiente
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {requestState.missingFields.map(
+                      (field) => (
+                        <span
+                          key={field}
+                          className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
+                        >
+                          {missingFieldLabels[field] ??
+                            field}
+                        </span>
+                      ),
+                    )}
                   </div>
-
-                  {analysis.type !== "unknown" ? (
-                    <div className="mt-6">
-                      <p className="text-sm text-slate-400">
-                        Document type successfully identified.
-                      </p>
-
-                      <button
-                        type="button"
-                        className="mt-5 rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400"
-                      >
-                        Continue with request
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="mt-6">
-                      <p className="text-sm text-amber-300">
-                        Please edit your request and provide a little more
-                        detail.
-                      </p>
-
-                      <button
-                        type="button"
-                        onClick={handleEdit}
-                        className="mt-5 rounded-xl border border-slate-700 px-5 py-3 font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800"
-                      >
-                        Edit request
-                      </button>
-                    </div>
-                  )}
-                </>
+                </div>
               )}
             </div>
           )}
-        </section>
+        </aside>
       </div>
     </main>
   );

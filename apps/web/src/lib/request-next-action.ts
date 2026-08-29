@@ -2,6 +2,7 @@ import { DocumentRequest } from "@/lib/request-types";
 
 export type NextActionType =
   | "ask_dni"
+  | "customer_not_found"
   | "ask_document_type"
   | "ask_account"
   | "ask_date_range"
@@ -22,6 +23,23 @@ export function getNextAction(
       type: "ask_dni",
       message:
         "Por favor, indícame tu DNI para poder identificar tu perfil.",
+    };
+  }
+
+  if (
+    request.customer.resolutionStatus === "not_found"
+  ) {
+    return {
+      type: "customer_not_found",
+      message: `No he encontrado ningún cliente asociado al DNI ${request.customer.dni}. Comprueba que esté escrito correctamente y vuelve a indicármelo.`,
+    };
+  }
+
+  if (request.missingFields.includes("customer")) {
+    return {
+      type: "customer_not_found",
+      message:
+        "No he podido identificar tu perfil. Comprueba el DNI e inténtalo de nuevo.",
     };
   }
 
