@@ -2,27 +2,41 @@
 
 import { useState } from "react";
 
-import { createEmptyDocumentRequest } from "@/lib/request-types";
+import {
+  createEmptyDocumentRequest,
+  DocumentRequest,
+  DocumentType,
+} from "@/lib/request-types";
+
 import {
   resolveCustomerFromDni,
   updateRequestStatus,
 } from "@/lib/request-engine";
 
+import { getNextAction } from "@/lib/request-next-action";
+
 export default function RequestEngineDevPage() {
   const [dni, setDni] = useState("");
-  const [result, setResult] = useState(
+
+  const [result, setResult] = useState<DocumentRequest>(
     updateRequestStatus(createEmptyDocumentRequest()),
   );
 
   const handleResolveCustomer = () => {
-    const initialRequest = createEmptyDocumentRequest();
-
-    const resolvedRequest = resolveCustomerFromDni(
-      initialRequest,
-      dni,
-    );
+    const resolvedRequest = resolveCustomerFromDni(result, dni);
 
     setResult(resolvedRequest);
+  };
+
+  const handleDocumentTypeChange = (
+    documentType: DocumentType,
+  ) => {
+    const updatedRequest = updateRequestStatus({
+      ...result,
+      documentType,
+    });
+
+    setResult(updatedRequest);
   };
 
   const handleReset = () => {
@@ -30,10 +44,12 @@ export default function RequestEngineDevPage() {
     setResult(updateRequestStatus(createEmptyDocumentRequest()));
   };
 
+  const nextAction = getNextAction(result);
+
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto max-w-6xl px-6 py-16">
-        <section className="max-w-4xl">
+        <section className="max-w-5xl">
           <p className="text-sm font-medium uppercase tracking-[0.3em] text-emerald-400">
             Finora Docs AI
           </p>
@@ -46,10 +62,11 @@ export default function RequestEngineDevPage() {
             Request engine inspector
           </h1>
 
-          <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-300">
-            Internal development screen used to verify customer resolution,
-            account retrieval and missing-field calculation before connecting
-            the real agent and backend.
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-300">
+            Internal development screen used to verify customer
+            resolution, account retrieval, missing-field calculation and
+            next-action decisions before connecting the OpenAI agent and
+            backend.
           </p>
 
           <div className="mt-10 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
@@ -109,6 +126,62 @@ export default function RequestEngineDevPage() {
             </div>
           </div>
 
+          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-sm font-medium uppercase tracking-[0.2em] text-violet-300">
+              Simulated document classification
+            </p>
+
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              For now this control simulates the document type that will
+              later be extracted from natural language by the OpenAI
+              agent.
+            </p>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  handleDocumentTypeChange("account_statement")
+                }
+                className={`rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                  result.documentType === "account_statement"
+                    ? "border-emerald-400 bg-emerald-400/10 text-emerald-300"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Account statement
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleDocumentTypeChange("loan_amortization")
+                }
+                className={`rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                  result.documentType === "loan_amortization"
+                    ? "border-emerald-400 bg-emerald-400/10 text-emerald-300"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Loan amortization
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleDocumentTypeChange("swift_confirmation")
+                }
+                className={`rounded-xl border px-4 py-2.5 text-sm font-medium transition ${
+                  result.documentType === "swift_confirmation"
+                    ? "border-emerald-400 bg-emerald-400/10 text-emerald-300"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                SWIFT confirmation
+              </button>
+            </div>
+          </div>
+
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
               <p className="text-sm font-medium uppercase tracking-[0.2em] text-emerald-400">
@@ -117,7 +190,10 @@ export default function RequestEngineDevPage() {
 
               <dl className="mt-5 space-y-4">
                 <div>
-                  <dt className="text-sm text-slate-500">Customer ID</dt>
+                  <dt className="text-sm text-slate-500">
+                    Customer ID
+                  </dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.customer.customerId ?? "Not resolved"}
                   </dd>
@@ -125,6 +201,7 @@ export default function RequestEngineDevPage() {
 
                 <div>
                   <dt className="text-sm text-slate-500">DNI</dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.customer.dni ?? "Missing"}
                   </dd>
@@ -132,6 +209,7 @@ export default function RequestEngineDevPage() {
 
                 <div>
                   <dt className="text-sm text-slate-500">Name</dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.customer.name ?? "Missing"}
                   </dd>
@@ -146,7 +224,18 @@ export default function RequestEngineDevPage() {
 
               <dl className="mt-5 space-y-4">
                 <div>
+                  <dt className="text-sm text-slate-500">
+                    Document type
+                  </dt>
+
+                  <dd className="mt-1 text-slate-200">
+                    {result.documentType}
+                  </dd>
+                </div>
+
+                <div>
                   <dt className="text-sm text-slate-500">Status</dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.status}
                   </dd>
@@ -156,6 +245,7 @@ export default function RequestEngineDevPage() {
                   <dt className="text-sm text-slate-500">
                     Available accounts
                   </dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.availableAccounts.length}
                   </dd>
@@ -165,6 +255,7 @@ export default function RequestEngineDevPage() {
                   <dt className="text-sm text-slate-500">
                     Automatically selected account
                   </dt>
+
                   <dd className="mt-1 text-slate-200">
                     {result.selectedAccount
                       ? `${result.selectedAccount.accountName} ${result.selectedAccount.maskedAccountNumber}`
@@ -196,6 +287,30 @@ export default function RequestEngineDevPage() {
                 No missing fields.
               </p>
             )}
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-6">
+            <p className="text-sm font-medium uppercase tracking-[0.2em] text-emerald-300">
+              Next action
+            </p>
+
+            <div className="mt-5">
+              <p className="text-sm text-slate-500">Action type</p>
+
+              <p className="mt-1 font-mono text-lg text-emerald-300">
+                {nextAction.type}
+              </p>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-5">
+              <p className="text-sm text-slate-500">
+                Suggested Finora message
+              </p>
+
+              <p className="mt-2 leading-7 text-slate-200">
+                {nextAction.message}
+              </p>
+            </div>
           </div>
 
           <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
