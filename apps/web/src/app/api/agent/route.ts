@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  createEmptyDocumentRequest,
   DocumentRequest,
   DocumentType,
 } from "@/lib/request-types";
@@ -18,9 +17,15 @@ import {
   NextAction,
 } from "@/lib/request-next-action";
 
+import {
+  createRequestSession,
+  getRequestSession,
+  saveRequestSession,
+} from "@/lib/server/request-store";
+
 interface AgentRequestBody {
   message?: string;
-  requestState?: DocumentRequest | null;
+  requestId?: string | null;
   action?: "confirm_request";
 }
 
@@ -311,11 +316,6 @@ function buildContextualNextAction(
 ): NextAction {
   const nextAction = getNextAction(updatedRequest);
 
-  /*
-   * If OpenAI could not extract anything useful from the latest
-   * message, provide a more helpful response instead of blindly
-   * repeating the same generic question.
-   */
   if (!hasUsefulExtraction(extraction)) {
     if (
       currentRequest.missingFields.includes("dni") ||
@@ -369,10 +369,6 @@ function buildContextualNextAction(
     }
   }
 
-  /*
-   * The user supplied four account digits, but they did not match
-   * any account belonging to the resolved customer.
-   */
   if (
     extraction.accountLast4 &&
     !updatedRequest.selectedAccount &&
@@ -384,9 +380,6 @@ function buildContextualNextAction(
     };
   }
 
-  /*
-   * Same protection for loans.
-   */
   if (
     extraction.loanLast4 &&
     !updatedRequest.selectedLoan &&
@@ -401,28 +394,64 @@ function buildContextualNextAction(
   return nextAction;
 }
 
+function getExistingSession(requestId: string) {
+  return getRequestSession(requestId);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body =
       (await request.json()) as AgentRequestBody;
 
-    const currentRequest =
-      body.requestState ?? createEmptyDocumentRequest();
-
     /*
-     * Explicit UI confirmation.
-     *
-     * This never relies on the LLM. The deterministic engine
-     * verifies again that the request is complete.
+     * Explicit confirmation must always refer to an existing
+     * server-side request session.
      */
     if (body.action === "confirm_request") {
+      if (!body.requestId) {
+        return NextResponse.json(
+          {
+            error:
+              "No se ha encontrado la sesión de la solicitud.",
+            code: "SESSION_REQUIRED",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      const storedRequest =
+        getExistingSession(body.requestId);
+
+      if (!storedRequest) {
+        return NextResponse.json(
+          {
+            error:
+              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
+            code: "SESSION_NOT_FOUND",
+          },
+          {
+            status: 404,
+          },
+        );
+      }
+
       const documentRequest =
-        confirmDocumentRequest(currentRequest);
+        confirmDocumentRequest(
+          storedRequest.requestState,
+        );
+
+      saveRequestSession(
+        storedRequest.requestId,
+        documentRequest,
+      );
 
       const nextAction =
         getNextAction(documentRequest);
 
       return NextResponse.json({
+        requestId: storedRequest.requestId,
         receivedMessage: null,
 
         agent: {
@@ -460,6 +489,38 @@ export async function POST(request: NextRequest) {
         },
       );
     }
+
+    /*
+     * First message: create a new server-side request.
+     *
+     * Following messages: recover the existing request using
+     * only its requestId.
+     */
+    let storedRequest;
+
+    if (body.requestId) {
+      storedRequest =
+        getExistingSession(body.requestId);
+
+      if (!storedRequest) {
+        return NextResponse.json(
+          {
+            error:
+              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
+            code: "SESSION_NOT_FOUND",
+          },
+          {
+            status: 404,
+          },
+        );
+      }
+    } else {
+      storedRequest =
+        createRequestSession();
+    }
+
+    const currentRequest =
+      storedRequest.requestState;
 
     const today = new Date()
       .toISOString()
@@ -569,10 +630,6 @@ Return exactly this JSON shape:
       message,
     );
 
-    /*
-     * OpenAI detects the user's intent to confirm.
-     * The deterministic engine retains the authority to approve it.
-     */
     if (extraction.confirmRequest) {
       documentRequest =
         confirmDocumentRequest(documentRequest);
@@ -585,7 +642,16 @@ Return exactly this JSON shape:
         extraction,
       );
 
+    /*
+     * Persist the authoritative state on the server.
+     */
+    saveRequestSession(
+      storedRequest.requestId,
+      documentRequest,
+    );
+
     return NextResponse.json({
+      requestId: storedRequest.requestId,
       receivedMessage: message,
 
       agent: {

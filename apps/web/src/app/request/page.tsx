@@ -14,6 +14,8 @@ interface ChatMessage {
 }
 
 interface AgentApiResponse {
+  requestId: string;
+
   receivedMessage: string | null;
 
   agent: {
@@ -28,6 +30,11 @@ interface AgentApiResponse {
     type: string;
     message: string;
   };
+}
+
+interface AgentApiError {
+  error: string;
+  code?: string;
 }
 
 const documentTypeLabels: Record<DocumentType, string> = {
@@ -58,31 +65,44 @@ export default function RequestPage() {
     },
   ]);
 
-  const [input, setInput] = useState("");
+  /*
+   * The browser keeps only the opaque request identifier.
+   * The authoritative DocumentRequest lives on the server.
+   */
+  const [requestId, setRequestId] =
+    useState<string | null>(null);
 
+  /*
+   * This copy exists only for rendering the current state.
+   * It is never sent back as the source of truth.
+   */
   const [requestState, setRequestState] =
     useState<DocumentRequest | null>(null);
 
-  const [isLoading, setIsLoading] = useState(false);
+  const [input, setInput] = useState("");
 
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState<string | null>(null);
 
   const isConfirmed =
     requestState?.status === "confirmed";
 
   const isReadyForConfirmation =
-    requestState?.status === "ready_for_confirmation";
+    requestState?.status ===
+    "ready_for_confirmation";
 
   function appendAssistantMessage(
     content: string,
   ) {
     setMessages((currentMessages) => {
       const lastMessage =
-        currentMessages[currentMessages.length - 1];
+        currentMessages[
+          currentMessages.length - 1
+        ];
 
-      /*
-       * Prevent accidental duplicate assistant messages.
-       */
       if (
         lastMessage?.role === "assistant" &&
         lastMessage.content === content
@@ -105,33 +125,43 @@ export default function RequestPage() {
     payload:
       | {
           message: string;
-          requestState: DocumentRequest | null;
+          requestId: string | null;
         }
       | {
           action: "confirm_request";
-          requestState: DocumentRequest;
+          requestId: string;
         },
-  ) {
-    const response = await fetch("/api/agent", {
-      method: "POST",
+  ): Promise<AgentApiResponse> {
+    const response = await fetch(
+      "/api/agent",
+      {
+        method: "POST",
 
-      headers: {
-        "Content-Type": "application/json",
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify(payload),
       },
-
-      body: JSON.stringify(payload),
-    });
+    );
 
     const data = (await response.json()) as
       | AgentApiResponse
-      | { error: string };
+      | AgentApiError;
 
     if (!response.ok || "error" in data) {
-      throw new Error(
-        "error" in data
-          ? data.error
-          : "No se ha podido procesar la solicitud.",
-      );
+      const apiError =
+        data as AgentApiError;
+
+      if (
+        apiError.code ===
+        "SESSION_NOT_FOUND"
+      ) {
+        setRequestId(null);
+        setRequestState(null);
+      }
+
+      throw new Error(apiError.error);
     }
 
     return data;
@@ -144,7 +174,11 @@ export default function RequestPage() {
 
     const message = input.trim();
 
-    if (!message || isLoading || isConfirmed) {
+    if (
+      !message ||
+      isLoading ||
+      isConfirmed
+    ) {
       return;
     }
 
@@ -164,12 +198,21 @@ export default function RequestPage() {
     setIsLoading(true);
 
     try {
-      const data = await sendAgentRequest({
-        message,
-        requestState,
-      });
+      const data =
+        await sendAgentRequest({
+          message,
+          requestId,
+        });
 
-      setRequestState(data.requestState);
+      /*
+       * requestId is created by the server on
+       * the first message and reused afterwards.
+       */
+      setRequestId(data.requestId);
+
+      setRequestState(
+        data.requestState,
+      );
 
       appendAssistantMessage(
         data.nextAction.message,
@@ -188,8 +231,10 @@ export default function RequestPage() {
 
   async function handleConfirmRequest() {
     if (
+      !requestId ||
       !requestState ||
-      requestState.status !== "ready_for_confirmation" ||
+      requestState.status !==
+        "ready_for_confirmation" ||
       isLoading
     ) {
       return;
@@ -199,24 +244,19 @@ export default function RequestPage() {
     setIsLoading(true);
 
     try {
-      const data = await sendAgentRequest({
-        action: "confirm_request",
-        requestState,
-      });
+      const data =
+        await sendAgentRequest({
+          action: "confirm_request",
+          requestId,
+        });
 
-      setRequestState(data.requestState);
+      setRequestState(
+        data.requestState,
+      );
 
-      if (
-        data.requestState.status === "confirmed"
-      ) {
-        appendAssistantMessage(
-          "Solicitud confirmada correctamente. Ya está preparada para su procesamiento.",
-        );
-      } else {
-        appendAssistantMessage(
-          data.nextAction.message,
-        );
-      }
+      appendAssistantMessage(
+        data.nextAction.message,
+      );
     } catch (requestError) {
       const errorMessage =
         requestError instanceof Error
@@ -230,6 +270,15 @@ export default function RequestPage() {
   }
 
   function resetConversation() {
+    /*
+     * A new request does not reuse the previous requestId.
+     * The next customer message will create a fresh
+     * server-side session.
+     */
+    setRequestId(null);
+
+    setRequestState(null);
+
     setMessages([
       {
         id: Date.now(),
@@ -239,7 +288,6 @@ export default function RequestPage() {
       },
     ]);
 
-    setRequestState(null);
     setInput("");
     setError(null);
   }
@@ -347,7 +395,9 @@ export default function RequestPage() {
                 <input
                   value={input}
                   onChange={(event) =>
-                    setInput(event.target.value)
+                    setInput(
+                      event.target.value,
+                    )
                   }
                   disabled={isLoading}
                   placeholder={
@@ -361,7 +411,10 @@ export default function RequestPage() {
 
                 <button
                   type="submit"
-                  disabled={isLoading || !input.trim()}
+                  disabled={
+                    isLoading ||
+                    !input.trim()
+                  }
                   className="rounded-2xl bg-emerald-500 px-6 py-4 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Enviar
@@ -403,7 +456,8 @@ export default function RequestPage() {
 
                 <p className="mt-1 font-medium">
                   {requestState.customer.name ??
-                    (requestState.customer.resolutionStatus ===
+                    (requestState.customer
+                      .resolutionStatus ===
                     "not_found"
                       ? "Cliente no encontrado"
                       : "Pendiente de identificar")}
@@ -411,7 +465,11 @@ export default function RequestPage() {
 
                 {requestState.customer.dni && (
                   <p className="mt-1 text-sm text-slate-400">
-                    DNI {requestState.customer.dni}
+                    DNI{" "}
+                    {
+                      requestState
+                        .customer.dni
+                    }
                   </p>
                 )}
               </div>
@@ -464,7 +522,8 @@ export default function RequestPage() {
                 </p>
 
                 <p className="mt-1 font-medium">
-                  {requestState.dateRange?.from &&
+                  {requestState.dateRange
+                    ?.from &&
                   requestState.dateRange?.to
                     ? `${requestState.dateRange.from} → ${requestState.dateRange.to}`
                     : "Pendiente"}
@@ -478,12 +537,14 @@ export default function RequestPage() {
 
                 <p
                   className={`mt-1 font-medium ${
-                    requestState.status === "confirmed"
+                    requestState.status ===
+                    "confirmed"
                       ? "text-emerald-300"
                       : "text-emerald-400"
                   }`}
                 >
-                  {requestState.status === "confirmed"
+                  {requestState.status ===
+                  "confirmed"
                     ? "Confirmada"
                     : requestState.status ===
                         "ready_for_confirmation"
@@ -492,7 +553,8 @@ export default function RequestPage() {
                 </p>
               </div>
 
-              {requestState.missingFields.length > 0 && (
+              {requestState.missingFields
+                .length > 0 && (
                 <div>
                   <p className="text-xs text-slate-500">
                     Información pendiente
@@ -505,12 +567,25 @@ export default function RequestPage() {
                           key={field}
                           className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
                         >
-                          {missingFieldLabels[field] ??
-                            field}
+                          {missingFieldLabels[
+                            field
+                          ] ?? field}
                         </span>
                       ),
                     )}
                   </div>
+                </div>
+              )}
+
+              {requestId && (
+                <div className="border-t border-slate-800 pt-5">
+                  <p className="text-xs text-slate-600">
+                    Sesión de solicitud activa
+                  </p>
+
+                  <p className="mt-1 truncate font-mono text-[11px] text-slate-700">
+                    {requestId}
+                  </p>
                 </div>
               )}
             </div>
