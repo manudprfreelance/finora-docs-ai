@@ -1,6 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useState,
+} from "react";
 
 import {
   DocumentRequest,
@@ -37,18 +41,35 @@ interface AgentApiError {
   code?: string;
 }
 
-const documentTypeLabels: Record<DocumentType, string> = {
-  account_statement: "Extracto de cuenta",
-  position_statement: "Estado de posición",
-  loan_amortization: "Cuadro de amortización",
-  swift_confirmation: "Confirmación SWIFT",
+const ACTIVE_REQUEST_STORAGE_KEY =
+  "finora.activeRequestId";
+
+const INITIAL_ASSISTANT_MESSAGE =
+  "Hola, soy Finora. Dime qué documento bancario necesitas y te ayudaré a solicitarlo.";
+
+const documentTypeLabels: Record<
+  DocumentType,
+  string
+> = {
+  account_statement:
+    "Extracto de cuenta",
+  position_statement:
+    "Estado de posición",
+  loan_amortization:
+    "Cuadro de amortización",
+  swift_confirmation:
+    "Confirmación SWIFT",
   unknown: "Sin identificar",
 };
 
-const missingFieldLabels: Record<string, string> = {
+const missingFieldLabels: Record<
+  string,
+  string
+> = {
   dni: "DNI",
   customer: "Cliente",
-  documentType: "Tipo de documento",
+  documentType:
+    "Tipo de documento",
   account: "Cuenta",
   dateRange: "Periodo",
   loan: "Préstamo",
@@ -56,70 +77,242 @@ const missingFieldLabels: Record<string, string> = {
 };
 
 export default function RequestPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      role: "assistant",
-      content:
-        "Hola, soy Finora. Dime qué documento bancario necesitas y te ayudaré a solicitarlo.",
-    },
-  ]);
+  const [messages, setMessages] =
+    useState<ChatMessage[]>([
+      {
+        id: 1,
+        role: "assistant",
+        content:
+          INITIAL_ASSISTANT_MESSAGE,
+      },
+    ]);
 
-  /*
-   * The browser keeps only the opaque request identifier.
-   * The authoritative DocumentRequest lives on the server.
-   */
   const [requestId, setRequestId] =
     useState<string | null>(null);
 
-  /*
-   * This copy exists only for rendering the current state.
-   * It is never sent back as the source of truth.
-   */
-  const [requestState, setRequestState] =
-    useState<DocumentRequest | null>(null);
+  const [
+    requestState,
+    setRequestState,
+  ] =
+    useState<DocumentRequest | null>(
+      null,
+    );
 
-  const [input, setInput] = useState("");
+  const [input, setInput] =
+    useState("");
 
   const [isLoading, setIsLoading] =
     useState(false);
+
+  const [
+    isRecoveringSession,
+    setIsRecoveringSession,
+  ] = useState(true);
 
   const [error, setError] =
     useState<string | null>(null);
 
   const isConfirmed =
-    requestState?.status === "confirmed";
+    requestState?.status ===
+    "confirmed";
 
   const isReadyForConfirmation =
     requestState?.status ===
     "ready_for_confirmation";
 
+  /*
+   * La cuenta no forma parte del resumen
+   * operativo de un cuadro de amortización.
+   */
+  const shouldShowAccount =
+    requestState !== null &&
+    requestState.documentType !==
+      "loan_amortization";
+
+  /*
+   * Mostramos el periodo únicamente:
+   *
+   * 1. si el motor lo considera pendiente, o
+   * 2. si realmente existe alguna fecha.
+   *
+   * Es importante comprobar primero que
+   * dateRange no sea null. De lo contrario,
+   * optional chaining devolvería undefined y
+   * "undefined !== null" sería true.
+   */
+  const shouldShowPeriod =
+    requestState !== null &&
+    (
+      requestState.missingFields.includes(
+        "dateRange",
+      ) ||
+      (
+        requestState.dateRange !== null &&
+        (
+          requestState.dateRange.from !==
+            null ||
+          requestState.dateRange.to !==
+            null
+        )
+      )
+    );
+
   function appendAssistantMessage(
     content: string,
   ) {
-    setMessages((currentMessages) => {
-      const lastMessage =
-        currentMessages[
-          currentMessages.length - 1
-        ];
+    setMessages(
+      (currentMessages) => {
+        const lastMessage =
+          currentMessages[
+            currentMessages.length - 1
+          ];
 
-      if (
-        lastMessage?.role === "assistant" &&
-        lastMessage.content === content
-      ) {
-        return currentMessages;
+        if (
+          lastMessage?.role ===
+            "assistant" &&
+          lastMessage.content === content
+        ) {
+          return currentMessages;
+        }
+
+        return [
+          ...currentMessages,
+          {
+            id: Date.now(),
+            role: "assistant",
+            content,
+          },
+        ];
+      },
+    );
+  }
+
+  function clearStoredRequestId() {
+    window.localStorage.removeItem(
+      ACTIVE_REQUEST_STORAGE_KEY,
+    );
+  }
+
+  function storeRequestId(
+    id: string,
+  ) {
+    window.localStorage.setItem(
+      ACTIVE_REQUEST_STORAGE_KEY,
+      id,
+    );
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function recoverSession() {
+      const storedRequestId =
+        window.localStorage.getItem(
+          ACTIVE_REQUEST_STORAGE_KEY,
+        );
+
+      if (!storedRequestId) {
+        if (!cancelled) {
+          setIsRecoveringSession(false);
+        }
+
+        return;
       }
 
-      return [
-        ...currentMessages,
-        {
-          id: Date.now(),
-          role: "assistant",
-          content,
-        },
-      ];
-    });
-  }
+      try {
+        const response = await fetch(
+          `/api/agent?requestId=${encodeURIComponent(
+            storedRequestId,
+          )}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+        const data =
+          (await response.json()) as
+            | AgentApiResponse
+            | AgentApiError;
+
+        if (
+          !response.ok ||
+          "error" in data
+        ) {
+          const apiError =
+            data as AgentApiError;
+
+          if (
+            apiError.code ===
+            "SESSION_NOT_FOUND"
+          ) {
+            clearStoredRequestId();
+
+            if (!cancelled) {
+              setRequestId(null);
+              setRequestState(null);
+            }
+
+            return;
+          }
+
+          throw new Error(
+            apiError.error,
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setRequestId(
+          data.requestId,
+        );
+
+        setRequestState(
+          data.requestState,
+        );
+
+        setMessages([
+          {
+            id: Date.now(),
+            role: "assistant",
+            content:
+              "He recuperado tu solicitud anterior.",
+          },
+          {
+            id: Date.now() + 1,
+            role: "assistant",
+            content:
+              data.nextAction.message,
+          },
+        ]);
+      } catch (recoveryError) {
+        if (cancelled) {
+          return;
+        }
+
+        const errorMessage =
+          recoveryError instanceof Error
+            ? recoveryError.message
+            : "No se ha podido recuperar la solicitud anterior.";
+
+        setError(errorMessage);
+      } finally {
+        if (!cancelled) {
+          setIsRecoveringSession(
+            false,
+          );
+        }
+      }
+    }
+
+    void recoverSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function sendAgentRequest(
     payload:
@@ -128,7 +321,8 @@ export default function RequestPage() {
           requestId: string | null;
         }
       | {
-          action: "confirm_request";
+          action:
+            "confirm_request";
           requestId: string;
         },
   ): Promise<AgentApiResponse> {
@@ -138,18 +332,25 @@ export default function RequestPage() {
         method: "POST",
 
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type":
+            "application/json",
         },
 
-        body: JSON.stringify(payload),
+        body: JSON.stringify(
+          payload,
+        ),
       },
     );
 
-    const data = (await response.json()) as
-      | AgentApiResponse
-      | AgentApiError;
+    const data =
+      (await response.json()) as
+        | AgentApiResponse
+        | AgentApiError;
 
-    if (!response.ok || "error" in data) {
+    if (
+      !response.ok ||
+      "error" in data
+    ) {
       const apiError =
         data as AgentApiError;
 
@@ -157,11 +358,15 @@ export default function RequestPage() {
         apiError.code ===
         "SESSION_NOT_FOUND"
       ) {
+        clearStoredRequestId();
+
         setRequestId(null);
         setRequestState(null);
       }
 
-      throw new Error(apiError.error);
+      throw new Error(
+        apiError.error,
+      );
     }
 
     return data;
@@ -177,6 +382,7 @@ export default function RequestPage() {
     if (
       !message ||
       isLoading ||
+      isRecoveringSession ||
       isConfirmed
     ) {
       return;
@@ -188,10 +394,12 @@ export default function RequestPage() {
       content: message,
     };
 
-    setMessages((currentMessages) => [
-      ...currentMessages,
-      userMessage,
-    ]);
+    setMessages(
+      (currentMessages) => [
+        ...currentMessages,
+        userMessage,
+      ],
+    );
 
     setInput("");
     setError(null);
@@ -204,11 +412,13 @@ export default function RequestPage() {
           requestId,
         });
 
-      /*
-       * requestId is created by the server on
-       * the first message and reused afterwards.
-       */
-      setRequestId(data.requestId);
+      setRequestId(
+        data.requestId,
+      );
+
+      storeRequestId(
+        data.requestId,
+      );
 
       setRequestState(
         data.requestState,
@@ -246,7 +456,8 @@ export default function RequestPage() {
     try {
       const data =
         await sendAgentRequest({
-          action: "confirm_request",
+          action:
+            "confirm_request",
           requestId,
         });
 
@@ -270,11 +481,8 @@ export default function RequestPage() {
   }
 
   function resetConversation() {
-    /*
-     * A new request does not reuse the previous requestId.
-     * The next customer message will create a fresh
-     * server-side session.
-     */
+    clearStoredRequestId();
+
     setRequestId(null);
 
     setRequestState(null);
@@ -284,7 +492,7 @@ export default function RequestPage() {
         id: Date.now(),
         role: "assistant",
         content:
-          "Hola, soy Finora. Dime qué documento bancario necesitas y te ayudaré a solicitarlo.",
+          INITIAL_ASSISTANT_MESSAGE,
       },
     ]);
 
@@ -314,8 +522,13 @@ export default function RequestPage() {
 
               <button
                 type="button"
-                onClick={resetConversation}
-                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+                onClick={
+                  resetConversation
+                }
+                disabled={
+                  isRecoveringSession
+                }
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Nueva solicitud
               </button>
@@ -323,26 +536,40 @@ export default function RequestPage() {
           </header>
 
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-8">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${
-                  message.role === "user"
-                    ? "justify-end"
-                    : "justify-start"
-                }`}
-              >
+            {messages.map(
+              (message) => (
                 <div
-                  className={`max-w-[82%] rounded-2xl px-5 py-4 text-[15px] leading-7 ${
-                    message.role === "user"
-                      ? "bg-emerald-500 text-slate-950"
-                      : "border border-slate-800 bg-slate-900 text-slate-100"
+                  key={message.id}
+                  className={`flex ${
+                    message.role ===
+                    "user"
+                      ? "justify-end"
+                      : "justify-start"
                   }`}
                 >
-                  {message.content}
+                  <div
+                    className={`max-w-[82%] rounded-2xl px-5 py-4 text-[15px] leading-7 ${
+                      message.role ===
+                      "user"
+                        ? "bg-emerald-500 text-slate-950"
+                        : "border border-slate-800 bg-slate-900 text-slate-100"
+                    }`}
+                  >
+                    {
+                      message.content
+                    }
+                  </div>
+                </div>
+              ),
+            )}
+
+            {isRecoveringSession && (
+              <div className="flex justify-start">
+                <div className="rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4 text-sm text-slate-400">
+                  Recuperando la solicitud activa...
                 </div>
               </div>
-            ))}
+            )}
 
             {isLoading && (
               <div className="flex justify-start">
@@ -368,7 +595,9 @@ export default function RequestPage() {
 
                 <button
                   type="button"
-                  onClick={handleConfirmRequest}
+                  onClick={
+                    handleConfirmRequest
+                  }
                   disabled={isLoading}
                   className="mt-4 rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -389,7 +618,9 @@ export default function RequestPage() {
               </div>
             ) : (
               <form
-                onSubmit={handleSubmit}
+                onSubmit={
+                  handleSubmit
+                }
                 className="flex gap-3"
               >
                 <input
@@ -399,11 +630,16 @@ export default function RequestPage() {
                       event.target.value,
                     )
                   }
-                  disabled={isLoading}
+                  disabled={
+                    isLoading ||
+                    isRecoveringSession
+                  }
                   placeholder={
-                    isReadyForConfirmation
-                      ? "Puedes confirmar o indicarme cualquier cambio..."
-                      : "Escribe tu mensaje..."
+                    isRecoveringSession
+                      ? "Recuperando solicitud..."
+                      : isReadyForConfirmation
+                        ? "Puedes confirmar o indicarme cualquier cambio..."
+                        : "Escribe tu mensaje..."
                   }
                   autoComplete="off"
                   className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-950 px-5 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500 disabled:opacity-60"
@@ -413,6 +649,7 @@ export default function RequestPage() {
                   type="submit"
                   disabled={
                     isLoading ||
+                    isRecoveringSession ||
                     !input.trim()
                   }
                   className="rounded-2xl bg-emerald-500 px-6 py-4 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
@@ -431,7 +668,9 @@ export default function RequestPage() {
 
           {!requestState ? (
             <p className="mt-5 text-sm leading-6 text-slate-500">
-              La información aparecerá aquí a medida que Finora entienda tu solicitud.
+              {isRecoveringSession
+                ? "Comprobando si existe una solicitud activa..."
+                : "La información aparecerá aquí a medida que Finora entienda tu solicitud."}
             </p>
           ) : (
             <div className="mt-6 space-y-6">
@@ -467,24 +706,26 @@ export default function RequestPage() {
                   <p className="mt-1 text-sm text-slate-400">
                     DNI{" "}
                     {
-                      requestState
-                        .customer.dni
+                      requestState.customer
+                        .dni
                     }
                   </p>
                 )}
               </div>
 
-              <div>
-                <p className="text-xs text-slate-500">
-                  Cuenta
-                </p>
+              {shouldShowAccount && (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Cuenta
+                  </p>
 
-                <p className="mt-1 font-medium">
-                  {requestState.selectedAccount
-                    ? `${requestState.selectedAccount.accountName} ${requestState.selectedAccount.maskedAccountNumber}`
-                    : "Pendiente"}
-                </p>
-              </div>
+                  <p className="mt-1 font-medium">
+                    {requestState.selectedAccount
+                      ? `${requestState.selectedAccount.accountName} ${requestState.selectedAccount.maskedAccountNumber}`
+                      : "Pendiente"}
+                  </p>
+                </div>
+              )}
 
               {requestState.documentType ===
                 "loan_amortization" && (
@@ -516,19 +757,20 @@ export default function RequestPage() {
                 </div>
               )}
 
-              <div>
-                <p className="text-xs text-slate-500">
-                  Periodo
-                </p>
+              {shouldShowPeriod && (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Periodo
+                  </p>
 
-                <p className="mt-1 font-medium">
-                  {requestState.dateRange
-                    ?.from &&
-                  requestState.dateRange?.to
-                    ? `${requestState.dateRange.from} → ${requestState.dateRange.to}`
-                    : "Pendiente"}
-                </p>
-              </div>
+                  <p className="mt-1 font-medium">
+                    {requestState.dateRange?.from &&
+                    requestState.dateRange?.to
+                      ? `${requestState.dateRange.from} → ${requestState.dateRange.to}`
+                      : "Pendiente"}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <p className="text-xs text-slate-500">

@@ -1,5 +1,8 @@
 import OpenAI from "openai";
-import { NextRequest, NextResponse } from "next/server";
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
 
 import {
   DocumentRequest,
@@ -46,7 +49,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function parseExtraction(output: string): AgentExtraction {
+function parseExtraction(
+  output: string,
+): AgentExtraction {
   const cleanedOutput = output
     .replace(/```json/gi, "")
     .replace(/```/g, "")
@@ -64,28 +69,32 @@ function parseExtraction(output: string): AgentExtraction {
     "unknown",
   ];
 
-  const documentType = allowedDocumentTypes.includes(
-    parsed.documentType as DocumentType,
-  )
-    ? (parsed.documentType as DocumentType)
-    : "unknown";
+  const documentType =
+    allowedDocumentTypes.includes(
+      parsed.documentType as DocumentType,
+    )
+      ? (parsed.documentType as DocumentType)
+      : "unknown";
 
   return {
     documentType,
 
     dni:
-      typeof parsed.dni === "string" && parsed.dni.trim()
+      typeof parsed.dni === "string" &&
+      parsed.dni.trim()
         ? parsed.dni.trim().toUpperCase()
         : null,
 
     accountLast4:
-      typeof parsed.accountLast4 === "string" &&
+      typeof parsed.accountLast4 ===
+        "string" &&
       parsed.accountLast4.trim()
         ? parsed.accountLast4.trim()
         : null,
 
     loanLast4:
-      typeof parsed.loanLast4 === "string" &&
+      typeof parsed.loanLast4 ===
+        "string" &&
       parsed.loanLast4.trim()
         ? parsed.loanLast4.trim()
         : null,
@@ -103,18 +112,21 @@ function parseExtraction(output: string): AgentExtraction {
         : null,
 
     movementDate:
-      typeof parsed.movementDate === "string" &&
+      typeof parsed.movementDate ===
+        "string" &&
       parsed.movementDate.trim()
         ? parsed.movementDate.trim()
         : null,
 
     movementAmount:
-      typeof parsed.movementAmount === "number"
+      typeof parsed.movementAmount ===
+      "number"
         ? parsed.movementAmount
         : null,
 
     movementBeneficiary:
-      typeof parsed.movementBeneficiary === "string" &&
+      typeof parsed.movementBeneficiary ===
+        "string" &&
       parsed.movementBeneficiary.trim()
         ? parsed.movementBeneficiary.trim()
         : null,
@@ -122,6 +134,64 @@ function parseExtraction(output: string): AgentExtraction {
     confirmRequest:
       parsed.confirmRequest === true,
   };
+}
+
+function normalizeExtractionForContext(
+  currentRequest: DocumentRequest,
+  extraction: AgentExtraction,
+): AgentExtraction {
+  const normalizedExtraction = {
+    ...extraction,
+  };
+
+  /*
+   * En un cuadro de amortización, si el
+   * siguiente dato pendiente es el préstamo
+   * y el modelo interpreta los cuatro
+   * dígitos como una cuenta, usamos el
+   * contexto determinista para corregirlo.
+   *
+   * Ejemplo:
+   * "Para la cuenta 7721"
+   *
+   * Aunque el cliente diga "cuenta",
+   * Finora acaba de preguntarle por uno
+   * de sus préstamos, por lo que 7721
+   * debe interpretarse como loanLast4.
+   */
+  if (
+    currentRequest.documentType ===
+      "loan_amortization" &&
+    currentRequest.missingFields.includes(
+      "loan",
+    ) &&
+    normalizedExtraction.loanLast4 ===
+      null &&
+    normalizedExtraction.accountLast4 !==
+      null
+  ) {
+    normalizedExtraction.loanLast4 =
+      normalizedExtraction.accountLast4;
+
+    normalizedExtraction.accountLast4 =
+      null;
+  }
+
+  return normalizedExtraction;
+}
+
+function isAttemptedCustomerChange(
+  currentRequest: DocumentRequest,
+  extraction: AgentExtraction,
+): boolean {
+  return (
+    currentRequest.customer.resolutionStatus ===
+      "resolved" &&
+    currentRequest.customer.dni !== null &&
+    extraction.dni !== null &&
+    extraction.dni !==
+      currentRequest.customer.dni
+  );
 }
 
 function applyExtraction(
@@ -155,19 +225,31 @@ function applyExtraction(
       : null,
 
     originalRequest:
-      currentRequest.originalRequest || message,
+      currentRequest.originalRequest ||
+      message,
   };
 
-  if (extraction.documentType !== "unknown") {
+  if (
+    extraction.documentType !== "unknown"
+  ) {
     documentRequest = {
       ...documentRequest,
-      documentType: extraction.documentType,
+      documentType:
+        extraction.documentType,
     };
   }
 
+  const attemptedCustomerChange =
+    isAttemptedCustomerChange(
+      currentRequest,
+      extraction,
+    );
+
   if (
     extraction.dni &&
-    extraction.dni !== documentRequest.customer.dni
+    extraction.dni !==
+      documentRequest.customer.dni &&
+    !attemptedCustomerChange
   ) {
     const preservedDocumentType =
       documentRequest.documentType;
@@ -178,25 +260,29 @@ function applyExtraction(
     const preservedOriginalRequest =
       documentRequest.originalRequest;
 
-    documentRequest = resolveCustomerFromDni(
-      documentRequest,
-      extraction.dni,
-    );
+    documentRequest =
+      resolveCustomerFromDni(
+        documentRequest,
+        extraction.dni,
+      );
 
     documentRequest = {
       ...documentRequest,
-      documentType: preservedDocumentType,
+      documentType:
+        preservedDocumentType,
       dateRange: preservedDateRange,
-      originalRequest: preservedOriginalRequest,
+      originalRequest:
+        preservedOriginalRequest,
     };
   }
 
   if (extraction.accountLast4) {
     const selectedAccount =
-      documentRequest.availableAccounts.find((account) =>
-        account.maskedAccountNumber.endsWith(
-          extraction.accountLast4 ?? "",
-        ),
+      documentRequest.availableAccounts.find(
+        (account) =>
+          account.maskedAccountNumber.endsWith(
+            extraction.accountLast4 ?? "",
+          ),
       ) ?? null;
 
     if (selectedAccount) {
@@ -209,10 +295,11 @@ function applyExtraction(
 
   if (extraction.loanLast4) {
     const selectedLoan =
-      documentRequest.availableLoans.find((loan) =>
-        loan.maskedLoanNumber.endsWith(
-          extraction.loanLast4 ?? "",
-        ),
+      documentRequest.availableLoans.find(
+        (loan) =>
+          loan.maskedLoanNumber.endsWith(
+            extraction.loanLast4 ?? "",
+          ),
       ) ?? null;
 
     if (selectedLoan) {
@@ -223,14 +310,18 @@ function applyExtraction(
     }
   }
 
-  if (extraction.dateFrom || extraction.dateTo) {
+  if (
+    extraction.dateFrom ||
+    extraction.dateTo
+  ) {
     documentRequest = {
       ...documentRequest,
 
       dateRange: {
         from:
           extraction.dateFrom ??
-          documentRequest.dateRange?.from ??
+          documentRequest.dateRange
+            ?.from ??
           null,
 
         to:
@@ -251,35 +342,43 @@ function applyExtraction(
         ? documentRequest.availableMovements.filter(
             (movement) =>
               movement.accountId ===
-              documentRequest.selectedAccount?.accountId,
+              documentRequest
+                .selectedAccount
+                ?.accountId,
           )
         : documentRequest.availableMovements;
 
     const selectedMovement =
-      possibleMovements.find((movement) => {
-        const matchesDate =
-          !extraction.movementDate ||
-          movement.date === extraction.movementDate;
+      possibleMovements.find(
+        (movement) => {
+          const matchesDate =
+            !extraction.movementDate ||
+            movement.date ===
+              extraction.movementDate;
 
-        const matchesAmount =
-          extraction.movementAmount === null ||
-          Math.abs(movement.amount) ===
-            Math.abs(extraction.movementAmount);
+          const matchesAmount =
+            extraction.movementAmount ===
+              null ||
+            Math.abs(movement.amount) ===
+              Math.abs(
+                extraction.movementAmount,
+              );
 
-        const matchesBeneficiary =
-          !extraction.movementBeneficiary ||
-          movement.description
-            .toLowerCase()
-            .includes(
-              extraction.movementBeneficiary.toLowerCase(),
-            );
+          const matchesBeneficiary =
+            !extraction.movementBeneficiary ||
+            movement.description
+              .toLowerCase()
+              .includes(
+                extraction.movementBeneficiary.toLowerCase(),
+              );
 
-        return (
-          matchesDate &&
-          matchesAmount &&
-          matchesBeneficiary
-        );
-      }) ?? null;
+          return (
+            matchesDate &&
+            matchesAmount &&
+            matchesBeneficiary
+          );
+        },
+      ) ?? null;
 
     if (selectedMovement) {
       documentRequest = {
@@ -289,14 +388,17 @@ function applyExtraction(
     }
   }
 
-  return updateRequestStatus(documentRequest);
+  return updateRequestStatus(
+    documentRequest,
+  );
 }
 
 function hasUsefulExtraction(
   extraction: AgentExtraction,
 ): boolean {
   return (
-    extraction.documentType !== "unknown" ||
+    extraction.documentType !==
+      "unknown" ||
     extraction.dni !== null ||
     extraction.accountLast4 !== null ||
     extraction.loanLast4 !== null ||
@@ -304,7 +406,8 @@ function hasUsefulExtraction(
     extraction.dateTo !== null ||
     extraction.movementDate !== null ||
     extraction.movementAmount !== null ||
-    extraction.movementBeneficiary !== null ||
+    extraction.movementBeneficiary !==
+      null ||
     extraction.confirmRequest
   );
 }
@@ -314,11 +417,27 @@ function buildContextualNextAction(
   updatedRequest: DocumentRequest,
   extraction: AgentExtraction,
 ): NextAction {
-  const nextAction = getNextAction(updatedRequest);
+  if (
+    isAttemptedCustomerChange(
+      currentRequest,
+      extraction,
+    )
+  ) {
+    return {
+      type: "customer_not_found",
+      message:
+        "Esta solicitud ya está asociada a otro cliente. Para trabajar con un cliente diferente, inicia una nueva solicitud.",
+    };
+  }
+
+  const nextAction =
+    getNextAction(updatedRequest);
 
   if (!hasUsefulExtraction(extraction)) {
     if (
-      currentRequest.missingFields.includes("dni") ||
+      currentRequest.missingFields.includes(
+        "dni",
+      ) ||
       nextAction.type === "ask_dni"
     ) {
       return {
@@ -328,7 +447,10 @@ function buildContextualNextAction(
       };
     }
 
-    if (nextAction.type === "ask_document_type") {
+    if (
+      nextAction.type ===
+      "ask_document_type"
+    ) {
       return {
         type: "ask_document_type",
         message:
@@ -336,7 +458,9 @@ function buildContextualNextAction(
       };
     }
 
-    if (nextAction.type === "ask_account") {
+    if (
+      nextAction.type === "ask_account"
+    ) {
       return {
         type: "ask_account",
         message:
@@ -344,7 +468,9 @@ function buildContextualNextAction(
       };
     }
 
-    if (nextAction.type === "ask_loan") {
+    if (
+      nextAction.type === "ask_loan"
+    ) {
       return {
         type: "ask_loan",
         message:
@@ -352,7 +478,10 @@ function buildContextualNextAction(
       };
     }
 
-    if (nextAction.type === "ask_date_range") {
+    if (
+      nextAction.type ===
+      "ask_date_range"
+    ) {
       return {
         type: "ask_date_range",
         message:
@@ -360,7 +489,10 @@ function buildContextualNextAction(
       };
     }
 
-    if (nextAction.type === "ask_movement") {
+    if (
+      nextAction.type ===
+      "ask_movement"
+    ) {
       return {
         type: "ask_movement",
         message:
@@ -372,7 +504,8 @@ function buildContextualNextAction(
   if (
     extraction.accountLast4 &&
     !updatedRequest.selectedAccount &&
-    updatedRequest.customer.resolutionStatus === "resolved"
+    updatedRequest.customer
+      .resolutionStatus === "resolved"
   ) {
     return {
       type: "ask_account",
@@ -383,7 +516,8 @@ function buildContextualNextAction(
   if (
     extraction.loanLast4 &&
     !updatedRequest.selectedLoan &&
-    updatedRequest.customer.resolutionStatus === "resolved"
+    updatedRequest.customer
+      .resolutionStatus === "resolved"
   ) {
     return {
       type: "ask_loan",
@@ -394,12 +528,97 @@ function buildContextualNextAction(
   return nextAction;
 }
 
-export async function POST(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+) {
+  try {
+    const requestId =
+      request.nextUrl.searchParams.get(
+        "requestId",
+      );
+
+    if (!requestId) {
+      return NextResponse.json(
+        {
+          error:
+            "El identificador de la solicitud es obligatorio.",
+          code: "SESSION_REQUIRED",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    const storedRequest =
+      await getRequestSession(requestId);
+
+    if (!storedRequest) {
+      return NextResponse.json(
+        {
+          error:
+            "No se ha encontrado la sesión de la solicitud.",
+          code: "SESSION_NOT_FOUND",
+        },
+        {
+          status: 404,
+        },
+      );
+    }
+
+    const nextAction =
+      getNextAction(
+        storedRequest.requestState,
+      );
+
+    return NextResponse.json({
+      requestId:
+        storedRequest.requestId,
+
+      receivedMessage: null,
+
+      agent: {
+        mode: "session_recovery",
+        provider: "finora-engine",
+        model: null,
+      },
+
+      extraction: null,
+
+      requestState:
+        storedRequest.requestState,
+
+      nextAction,
+    });
+  } catch (error) {
+    console.error(
+      "Agent session recovery error:",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "No se ha podido recuperar la solicitud.",
+      },
+      {
+        status: 500,
+      },
+    );
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+) {
   try {
     const body =
       (await request.json()) as AgentRequestBody;
 
-    if (body.action === "confirm_request") {
+    if (
+      body.action ===
+      "confirm_request"
+    ) {
       if (!body.requestId) {
         return NextResponse.json(
           {
@@ -414,7 +633,9 @@ export async function POST(request: NextRequest) {
       }
 
       const storedRequest =
-        await getRequestSession(body.requestId);
+        await getRequestSession(
+          body.requestId,
+        );
 
       if (!storedRequest) {
         return NextResponse.json(
@@ -443,7 +664,9 @@ export async function POST(request: NextRequest) {
         getNextAction(documentRequest);
 
       return NextResponse.json({
-        requestId: storedRequest.requestId,
+        requestId:
+          storedRequest.requestId,
+
         receivedMessage: null,
 
         agent: {
@@ -453,7 +676,8 @@ export async function POST(request: NextRequest) {
         },
 
         extraction: null,
-        requestState: documentRequest,
+        requestState:
+          documentRequest,
         nextAction,
       });
     }
@@ -461,7 +685,8 @@ export async function POST(request: NextRequest) {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         {
-          error: "OpenAI API key is not configured.",
+          error:
+            "OpenAI API key is not configured.",
         },
         {
           status: 500,
@@ -469,12 +694,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const message = body.message?.trim();
+    const message =
+      body.message?.trim();
 
     if (!message) {
       return NextResponse.json(
         {
-          error: "El mensaje es obligatorio.",
+          error:
+            "El mensaje es obligatorio.",
         },
         {
           status: 400,
@@ -514,10 +741,14 @@ export async function POST(request: NextRequest) {
       .toISOString()
       .slice(0, 10);
 
-    const response = await openai.responses.create({
-      model: "gpt-5.6-luna",
+    const currentNextAction =
+      getNextAction(currentRequest);
 
-      instructions: `
+    const response =
+      await openai.responses.create({
+        model: "gpt-5.6-luna",
+
+        instructions: `
 You are the natural-language understanding layer of Finora Docs AI,
 a Spanish banking document request assistant.
 
@@ -527,6 +758,19 @@ Your job is ONLY to extract structured information from the latest
 customer message. Do not answer the customer.
 
 Current date: ${today}
+
+Current document type: ${currentRequest.documentType}
+Current next action expected by the deterministic engine: ${currentNextAction.type}
+
+Use this conversation context when interpreting ambiguous language.
+
+For example:
+- if the current document type is loan_amortization and the system is
+  currently asking for a loan, four final digits should normally be
+  interpreted as loanLast4 even if the customer casually calls it
+  "cuenta", "producto" or simply provides the number;
+- if the system is asking for an account, four final digits should
+  normally be interpreted as accountLast4.
 
 Supported document types:
 
@@ -603,22 +847,42 @@ Return exactly this JSON shape:
   "movementBeneficiary": string | null,
   "confirmRequest": boolean
 }
-      `.trim(),
+        `.trim(),
 
-      input: message,
-    });
+        input: message,
+      });
 
-    const extraction = parseExtraction(
-      response.output_text,
-    );
+    const rawExtraction =
+      parseExtraction(
+        response.output_text,
+      );
 
-    let documentRequest = applyExtraction(
-      currentRequest,
-      extraction,
-      message,
-    );
+    /*
+     * OpenAI interpreta el lenguaje.
+     * El motor determinista añade después
+     * el contexto de negocio necesario para
+     * resolver ambigüedades.
+     */
+    const extraction =
+      normalizeExtractionForContext(
+        currentRequest,
+        rawExtraction,
+      );
 
-    if (extraction.confirmRequest) {
+    let documentRequest =
+      applyExtraction(
+        currentRequest,
+        extraction,
+        message,
+      );
+
+    if (
+      extraction.confirmRequest &&
+      !isAttemptedCustomerChange(
+        currentRequest,
+        extraction,
+      )
+    ) {
       documentRequest =
         confirmDocumentRequest(
           documentRequest,
@@ -638,7 +902,9 @@ Return exactly this JSON shape:
     );
 
     return NextResponse.json({
-      requestId: storedRequest.requestId,
+      requestId:
+        storedRequest.requestId,
+
       receivedMessage: message,
 
       agent: {
@@ -648,7 +914,8 @@ Return exactly this JSON shape:
       },
 
       extraction,
-      requestState: documentRequest,
+      requestState:
+        documentRequest,
       nextAction,
     });
   } catch (error) {

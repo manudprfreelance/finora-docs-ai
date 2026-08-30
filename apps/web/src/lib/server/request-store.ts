@@ -5,7 +5,7 @@ import {
 
 import {
   requestRepository,
-} from "@/lib/server/memory-request-repository";
+} from "@/lib/server/postgres-request-repository";
 
 export async function createRequestSession() {
   return requestRepository.create(
