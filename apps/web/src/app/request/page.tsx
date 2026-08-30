@@ -14,12 +14,12 @@ interface ChatMessage {
 }
 
 interface AgentApiResponse {
-  receivedMessage: string;
+  receivedMessage: string | null;
 
   agent: {
     mode: string;
     provider: string;
-    model: string;
+    model: string | null;
   };
 
   requestState: DocumentRequest;
@@ -40,7 +40,7 @@ const documentTypeLabels: Record<DocumentType, string> = {
 
 const missingFieldLabels: Record<string, string> = {
   dni: "DNI",
-  name: "Nombre",
+  customer: "Cliente",
   documentType: "Tipo de documento",
   account: "Cuenta",
   dateRange: "Periodo",
@@ -67,6 +67,76 @@ export default function RequestPage() {
 
   const [error, setError] = useState<string | null>(null);
 
+  const isConfirmed =
+    requestState?.status === "confirmed";
+
+  const isReadyForConfirmation =
+    requestState?.status === "ready_for_confirmation";
+
+  function appendAssistantMessage(
+    content: string,
+  ) {
+    setMessages((currentMessages) => {
+      const lastMessage =
+        currentMessages[currentMessages.length - 1];
+
+      /*
+       * Prevent accidental duplicate assistant messages.
+       */
+      if (
+        lastMessage?.role === "assistant" &&
+        lastMessage.content === content
+      ) {
+        return currentMessages;
+      }
+
+      return [
+        ...currentMessages,
+        {
+          id: Date.now(),
+          role: "assistant",
+          content,
+        },
+      ];
+    });
+  }
+
+  async function sendAgentRequest(
+    payload:
+      | {
+          message: string;
+          requestState: DocumentRequest | null;
+        }
+      | {
+          action: "confirm_request";
+          requestState: DocumentRequest;
+        },
+  ) {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(payload),
+    });
+
+    const data = (await response.json()) as
+      | AgentApiResponse
+      | { error: string };
+
+    if (!response.ok || "error" in data) {
+      throw new Error(
+        "error" in data
+          ? data.error
+          : "No se ha podido procesar la solicitud.",
+      );
+    }
+
+    return data;
+  }
+
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>,
   ) {
@@ -74,7 +144,7 @@ export default function RequestPage() {
 
     const message = input.trim();
 
-    if (!message || isLoading) {
+    if (!message || isLoading || isConfirmed) {
       return;
     }
 
@@ -94,41 +164,59 @@ export default function RequestPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/agent", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message,
-          requestState,
-        }),
+      const data = await sendAgentRequest({
+        message,
+        requestState,
       });
-
-      const data = (await response.json()) as
-        | AgentApiResponse
-        | { error: string };
-
-      if (!response.ok || "error" in data) {
-        throw new Error(
-          "error" in data
-            ? data.error
-            : "No se ha podido procesar la solicitud.",
-        );
-      }
 
       setRequestState(data.requestState);
 
-      const assistantMessage: ChatMessage = {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: data.nextAction.message,
-      };
+      appendAssistantMessage(
+        data.nextAction.message,
+      );
+    } catch (requestError) {
+      const errorMessage =
+        requestError instanceof Error
+          ? requestError.message
+          : "Se ha producido un error inesperado.";
 
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        assistantMessage,
-      ]);
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleConfirmRequest() {
+    if (
+      !requestState ||
+      requestState.status !== "ready_for_confirmation" ||
+      isLoading
+    ) {
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const data = await sendAgentRequest({
+        action: "confirm_request",
+        requestState,
+      });
+
+      setRequestState(data.requestState);
+
+      if (
+        data.requestState.status === "confirmed"
+      ) {
+        appendAssistantMessage(
+          "Solicitud confirmada correctamente. Ya está preparada para su procesamiento.",
+        );
+      } else {
+        appendAssistantMessage(
+          data.nextAction.message,
+        );
+      }
     } catch (requestError) {
       const errorMessage =
         requestError instanceof Error
@@ -224,29 +312,62 @@ export default function RequestPage() {
               </div>
             )}
 
-            <form
-              onSubmit={handleSubmit}
-              className="flex gap-3"
-            >
-              <input
-                value={input}
-                onChange={(event) =>
-                  setInput(event.target.value)
-                }
-                disabled={isLoading}
-                placeholder="Escribe tu mensaje..."
-                autoComplete="off"
-                className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-950 px-5 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500 disabled:opacity-60"
-              />
+            {isReadyForConfirmation && (
+              <div className="mb-4 rounded-2xl border border-emerald-900/70 bg-emerald-950/20 p-4">
+                <p className="text-sm text-emerald-200">
+                  Finora ha recopilado toda la información necesaria.
+                </p>
 
-              <button
-                type="submit"
-                disabled={isLoading || !input.trim()}
-                className="rounded-2xl bg-emerald-500 px-6 py-4 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                <button
+                  type="button"
+                  onClick={handleConfirmRequest}
+                  disabled={isLoading}
+                  className="mt-4 rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Confirmar solicitud
+                </button>
+              </div>
+            )}
+
+            {isConfirmed ? (
+              <div className="rounded-2xl border border-emerald-800/70 bg-emerald-950/30 px-5 py-4">
+                <p className="font-medium text-emerald-300">
+                  Solicitud confirmada
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Esta solicitud ya está preparada para su procesamiento.
+                </p>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleSubmit}
+                className="flex gap-3"
               >
-                Enviar
-              </button>
-            </form>
+                <input
+                  value={input}
+                  onChange={(event) =>
+                    setInput(event.target.value)
+                  }
+                  disabled={isLoading}
+                  placeholder={
+                    isReadyForConfirmation
+                      ? "Puedes confirmar o indicarme cualquier cambio..."
+                      : "Escribe tu mensaje..."
+                  }
+                  autoComplete="off"
+                  className="min-w-0 flex-1 rounded-2xl border border-slate-700 bg-slate-950 px-5 py-4 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-500 disabled:opacity-60"
+                />
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !input.trim()}
+                  className="rounded-2xl bg-emerald-500 px-6 py-4 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Enviar
+                </button>
+              </form>
+            )}
           </div>
         </section>
 
@@ -282,7 +403,10 @@ export default function RequestPage() {
 
                 <p className="mt-1 font-medium">
                   {requestState.customer.name ??
-                    "Pendiente de identificar"}
+                    (requestState.customer.resolutionStatus ===
+                    "not_found"
+                      ? "Cliente no encontrado"
+                      : "Pendiente de identificar")}
                 </p>
 
                 {requestState.customer.dni && (
@@ -352,11 +476,19 @@ export default function RequestPage() {
                   Estado
                 </p>
 
-                <p className="mt-1 font-medium text-emerald-400">
-                  {requestState.status ===
-                  "ready_for_confirmation"
-                    ? "Lista para confirmar"
-                    : "Recopilando información"}
+                <p
+                  className={`mt-1 font-medium ${
+                    requestState.status === "confirmed"
+                      ? "text-emerald-300"
+                      : "text-emerald-400"
+                  }`}
+                >
+                  {requestState.status === "confirmed"
+                    ? "Confirmada"
+                    : requestState.status ===
+                        "ready_for_confirmation"
+                      ? "Lista para confirmar"
+                      : "Recopilando información"}
                 </p>
               </div>
 

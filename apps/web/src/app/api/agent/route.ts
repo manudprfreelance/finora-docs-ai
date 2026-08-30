@@ -8,15 +8,20 @@ import {
 } from "@/lib/request-types";
 
 import {
+  confirmDocumentRequest,
   resolveCustomerFromDni,
   updateRequestStatus,
 } from "@/lib/request-engine";
 
-import { getNextAction } from "@/lib/request-next-action";
+import {
+  getNextAction,
+  NextAction,
+} from "@/lib/request-next-action";
 
 interface AgentRequestBody {
   message?: string;
   requestState?: DocumentRequest | null;
+  action?: "confirm_request";
 }
 
 interface AgentExtraction {
@@ -29,6 +34,7 @@ interface AgentExtraction {
   movementDate: string | null;
   movementAmount: number | null;
   movementBeneficiary: string | null;
+  confirmRequest: boolean;
 }
 
 const openai = new OpenAI({
@@ -107,6 +113,9 @@ function parseExtraction(output: string): AgentExtraction {
       parsed.movementBeneficiary.trim()
         ? parsed.movementBeneficiary.trim()
         : null,
+
+    confirmRequest:
+      parsed.confirmRequest === true,
   };
 }
 
@@ -144,9 +153,6 @@ function applyExtraction(
       currentRequest.originalRequest || message,
   };
 
-  /*
-   * Never replace an already-known document type with "unknown".
-   */
   if (extraction.documentType !== "unknown") {
     documentRequest = {
       ...documentRequest,
@@ -154,10 +160,6 @@ function applyExtraction(
     };
   }
 
-  /*
-   * Resolve the customer while preserving everything already learned
-   * during previous conversation turns.
-   */
   if (
     extraction.dni &&
     extraction.dni !== documentRequest.customer.dni
@@ -184,9 +186,6 @@ function applyExtraction(
     };
   }
 
-  /*
-   * Select an account from the accounts retrieved from bank data.
-   */
   if (extraction.accountLast4) {
     const selectedAccount =
       documentRequest.availableAccounts.find((account) =>
@@ -203,9 +202,6 @@ function applyExtraction(
     }
   }
 
-  /*
-   * Select a loan when applicable.
-   */
   if (extraction.loanLast4) {
     const selectedLoan =
       documentRequest.availableLoans.find((loan) =>
@@ -222,9 +218,6 @@ function applyExtraction(
     }
   }
 
-  /*
-   * Merge date information instead of replacing previously known dates.
-   */
   if (extraction.dateFrom || extraction.dateTo) {
     documentRequest = {
       ...documentRequest,
@@ -243,9 +236,6 @@ function applyExtraction(
     };
   }
 
-  /*
-   * Try to identify a bank movement for SWIFT confirmations.
-   */
   if (
     extraction.movementDate ||
     extraction.movementAmount !== null ||
@@ -297,8 +287,156 @@ function applyExtraction(
   return updateRequestStatus(documentRequest);
 }
 
+function hasUsefulExtraction(
+  extraction: AgentExtraction,
+): boolean {
+  return (
+    extraction.documentType !== "unknown" ||
+    extraction.dni !== null ||
+    extraction.accountLast4 !== null ||
+    extraction.loanLast4 !== null ||
+    extraction.dateFrom !== null ||
+    extraction.dateTo !== null ||
+    extraction.movementDate !== null ||
+    extraction.movementAmount !== null ||
+    extraction.movementBeneficiary !== null ||
+    extraction.confirmRequest
+  );
+}
+
+function buildContextualNextAction(
+  currentRequest: DocumentRequest,
+  updatedRequest: DocumentRequest,
+  extraction: AgentExtraction,
+): NextAction {
+  const nextAction = getNextAction(updatedRequest);
+
+  /*
+   * If OpenAI could not extract anything useful from the latest
+   * message, provide a more helpful response instead of blindly
+   * repeating the same generic question.
+   */
+  if (!hasUsefulExtraction(extraction)) {
+    if (
+      currentRequest.missingFields.includes("dni") ||
+      nextAction.type === "ask_dni"
+    ) {
+      return {
+        type: "ask_dni",
+        message:
+          "Para continuar necesito tu DNI completo, incluyendo la letra. Por ejemplo: 12345678A.",
+      };
+    }
+
+    if (nextAction.type === "ask_document_type") {
+      return {
+        type: "ask_document_type",
+        message:
+          "No he podido identificar qué documento bancario necesitas. Puedes pedirme, por ejemplo, un extracto de cuenta, un cuadro de amortización o una confirmación SWIFT.",
+      };
+    }
+
+    if (nextAction.type === "ask_account") {
+      return {
+        type: "ask_account",
+        message:
+          "No he podido identificar la cuenta en tu mensaje. Indícame los últimos cuatro dígitos de una de las cuentas asociadas a tu perfil.",
+      };
+    }
+
+    if (nextAction.type === "ask_loan") {
+      return {
+        type: "ask_loan",
+        message:
+          "No he podido identificar el préstamo. Indícame los últimos cuatro dígitos del préstamo para el que necesitas el cuadro de amortización.",
+      };
+    }
+
+    if (nextAction.type === "ask_date_range") {
+      return {
+        type: "ask_date_range",
+        message:
+          "No he podido identificar el periodo. Indícame una fecha inicial y una fecha final, por ejemplo: del 1 al 31 de julio de 2026.",
+      };
+    }
+
+    if (nextAction.type === "ask_movement") {
+      return {
+        type: "ask_movement",
+        message:
+          "No he podido identificar la operación. Puedes indicarme la fecha, el importe o el beneficiario de la transferencia.",
+      };
+    }
+  }
+
+  /*
+   * The user supplied four account digits, but they did not match
+   * any account belonging to the resolved customer.
+   */
+  if (
+    extraction.accountLast4 &&
+    !updatedRequest.selectedAccount &&
+    updatedRequest.customer.resolutionStatus === "resolved"
+  ) {
+    return {
+      type: "ask_account",
+      message: `No he encontrado ninguna cuenta de tu perfil terminada en ${extraction.accountLast4}. Indícame una de las cuentas asociadas a tu perfil.`,
+    };
+  }
+
+  /*
+   * Same protection for loans.
+   */
+  if (
+    extraction.loanLast4 &&
+    !updatedRequest.selectedLoan &&
+    updatedRequest.customer.resolutionStatus === "resolved"
+  ) {
+    return {
+      type: "ask_loan",
+      message: `No he encontrado ningún préstamo de tu perfil terminado en ${extraction.loanLast4}. Indícame uno de los préstamos asociados a tu perfil.`,
+    };
+  }
+
+  return nextAction;
+}
+
 export async function POST(request: NextRequest) {
   try {
+    const body =
+      (await request.json()) as AgentRequestBody;
+
+    const currentRequest =
+      body.requestState ?? createEmptyDocumentRequest();
+
+    /*
+     * Explicit UI confirmation.
+     *
+     * This never relies on the LLM. The deterministic engine
+     * verifies again that the request is complete.
+     */
+    if (body.action === "confirm_request") {
+      const documentRequest =
+        confirmDocumentRequest(currentRequest);
+
+      const nextAction =
+        getNextAction(documentRequest);
+
+      return NextResponse.json({
+        receivedMessage: null,
+
+        agent: {
+          mode: "deterministic",
+          provider: "finora-engine",
+          model: null,
+        },
+
+        extraction: null,
+        requestState: documentRequest,
+        nextAction,
+      });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         {
@@ -309,9 +447,6 @@ export async function POST(request: NextRequest) {
         },
       );
     }
-
-    const body =
-      (await request.json()) as AgentRequestBody;
 
     const message = body.message?.trim();
 
@@ -325,9 +460,6 @@ export async function POST(request: NextRequest) {
         },
       );
     }
-
-    const currentRequest =
-      body.requestState ?? createEmptyDocumentRequest();
 
     const today = new Date()
       .toISOString()
@@ -367,7 +499,9 @@ Supported document types:
 - unknown:
   only when the document cannot be reliably identified from this message.
 
-Extract a Spanish DNI only if explicitly provided.
+Extract a Spanish DNI only when a complete DNI is explicitly provided.
+A DNI must contain 8 digits followed by one letter.
+Do not interpret incomplete numbers as a DNI.
 
 If the customer identifies an account by its final digits,
 extract exactly those final 4 digits.
@@ -384,6 +518,21 @@ For transfer movements:
 - extract date if explicitly identifiable;
 - extract numeric amount if provided;
 - extract beneficiary text if provided.
+
+Set confirmRequest to true only when the customer is clearly confirming
+the current request, for example:
+- "sí, confirma"
+- "confirmo"
+- "adelante"
+- "está correcto"
+- "puedes tramitarlo"
+
+Do not interpret a generic "sí" as confirmation unless it clearly refers
+to confirming the request.
+
+Messages unrelated to banking document requests, insults, greetings or
+casual conversation must not be forced into any field.
+Return null or unknown for fields that are not actually present.
 
 Do not invent information.
 
@@ -402,7 +551,8 @@ Return exactly this JSON shape:
   "dateTo": string | null,
   "movementDate": string | null,
   "movementAmount": number | null,
-  "movementBeneficiary": string | null
+  "movementBeneficiary": string | null,
+  "confirmRequest": boolean
 }
       `.trim(),
 
@@ -413,14 +563,27 @@ Return exactly this JSON shape:
       response.output_text,
     );
 
-    const documentRequest = applyExtraction(
+    let documentRequest = applyExtraction(
       currentRequest,
       extraction,
       message,
     );
 
+    /*
+     * OpenAI detects the user's intent to confirm.
+     * The deterministic engine retains the authority to approve it.
+     */
+    if (extraction.confirmRequest) {
+      documentRequest =
+        confirmDocumentRequest(documentRequest);
+    }
+
     const nextAction =
-      getNextAction(documentRequest);
+      buildContextualNextAction(
+        currentRequest,
+        documentRequest,
+        extraction,
+      );
 
     return NextResponse.json({
       receivedMessage: message,
