@@ -44,10 +44,6 @@ export function calculateMissingFields(
   } else if (
     request.customer.resolutionStatus !== "resolved"
   ) {
-    /*
-     * Once a DNI has been provided, Finora must identify the
-     * customer before continuing with any bank-specific data.
-     */
     missingFields.push("customer");
 
     return missingFields;
@@ -100,6 +96,10 @@ export function isRequestReadyForConfirmation(
 export function updateRequestStatus(
   request: DocumentRequest,
 ): DocumentRequest {
+  if (request.status === "confirmed") {
+    return request;
+  }
+
   const missingFields = calculateMissingFields(request);
 
   return {
@@ -109,6 +109,26 @@ export function updateRequestStatus(
       missingFields.length === 0
         ? "ready_for_confirmation"
         : "collecting_information",
+  };
+}
+
+export function confirmDocumentRequest(
+  request: DocumentRequest,
+): DocumentRequest {
+  const missingFields = calculateMissingFields(request);
+
+  if (missingFields.length > 0) {
+    return {
+      ...request,
+      missingFields,
+      status: "collecting_information",
+    };
+  }
+
+  return {
+    ...request,
+    missingFields: [],
+    status: "confirmed",
   };
 }
 
