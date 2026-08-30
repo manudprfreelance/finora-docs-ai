@@ -394,19 +394,11 @@ function buildContextualNextAction(
   return nextAction;
 }
 
-function getExistingSession(requestId: string) {
-  return getRequestSession(requestId);
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body =
       (await request.json()) as AgentRequestBody;
 
-    /*
-     * Explicit confirmation must always refer to an existing
-     * server-side request session.
-     */
     if (body.action === "confirm_request") {
       if (!body.requestId) {
         return NextResponse.json(
@@ -422,7 +414,7 @@ export async function POST(request: NextRequest) {
       }
 
       const storedRequest =
-        getExistingSession(body.requestId);
+        await getRequestSession(body.requestId);
 
       if (!storedRequest) {
         return NextResponse.json(
@@ -442,7 +434,7 @@ export async function POST(request: NextRequest) {
           storedRequest.requestState,
         );
 
-      saveRequestSession(
+      await saveRequestSession(
         storedRequest.requestId,
         documentRequest,
       );
@@ -490,17 +482,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /*
-     * First message: create a new server-side request.
-     *
-     * Following messages: recover the existing request using
-     * only its requestId.
-     */
     let storedRequest;
 
     if (body.requestId) {
       storedRequest =
-        getExistingSession(body.requestId);
+        await getRequestSession(
+          body.requestId,
+        );
 
       if (!storedRequest) {
         return NextResponse.json(
@@ -516,7 +504,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       storedRequest =
-        createRequestSession();
+        await createRequestSession();
     }
 
     const currentRequest =
@@ -632,7 +620,9 @@ Return exactly this JSON shape:
 
     if (extraction.confirmRequest) {
       documentRequest =
-        confirmDocumentRequest(documentRequest);
+        confirmDocumentRequest(
+          documentRequest,
+        );
     }
 
     const nextAction =
@@ -642,10 +632,7 @@ Return exactly this JSON shape:
         extraction,
       );
 
-    /*
-     * Persist the authoritative state on the server.
-     */
-    saveRequestSession(
+    await saveRequestSession(
       storedRequest.requestId,
       documentRequest,
     );
@@ -665,7 +652,10 @@ Return exactly this JSON shape:
       nextAction,
     });
   } catch (error) {
-    console.error("Agent API error:", error);
+    console.error(
+      "Agent API error:",
+      error,
+    );
 
     return NextResponse.json(
       {
