@@ -26,6 +26,10 @@ import {
   saveRequestSession,
 } from "@/lib/server/request-store";
 
+import {
+  createRequestEvent,
+} from "@/lib/server/request-event-repository";
+
 interface AgentRequestBody {
   message?: string;
   requestId?: string | null;
@@ -145,19 +149,11 @@ function normalizeExtractionForContext(
   };
 
   /*
-   * En un cuadro de amortización, si el
-   * siguiente dato pendiente es el préstamo
-   * y el modelo interpreta los cuatro
-   * dígitos como una cuenta, usamos el
-   * contexto determinista para corregirlo.
-   *
-   * Ejemplo:
-   * "Para la cuenta 7721"
-   *
-   * Aunque el cliente diga "cuenta",
-   * Finora acaba de preguntarle por uno
-   * de sus préstamos, por lo que 7721
-   * debe interpretarse como loanLast4.
+   * Si Finora está esperando un préstamo
+   * para un cuadro de amortización y el
+   * modelo interpreta los cuatro dígitos
+   * como una cuenta, usamos el contexto
+   * determinista para corregirlo.
    */
   if (
     currentRequest.documentType ===
@@ -270,7 +266,8 @@ function applyExtraction(
       ...documentRequest,
       documentType:
         preservedDocumentType,
-      dateRange: preservedDateRange,
+      dateRange:
+        preservedDateRange,
       originalRequest:
         preservedOriginalRequest,
     };
@@ -326,7 +323,8 @@ function applyExtraction(
 
         to:
           extraction.dateTo ??
-          documentRequest.dateRange?.to ??
+          documentRequest.dateRange
+            ?.to ??
           null,
       },
     };
@@ -528,6 +526,153 @@ function buildContextualNextAction(
   return nextAction;
 }
 
+function getChangedFields(
+  before: DocumentRequest,
+  after: DocumentRequest,
+): string[] {
+  const changedFields: string[] = [];
+
+  if (
+    before.documentType !==
+    after.documentType
+  ) {
+    changedFields.push(
+      "documentType",
+    );
+  }
+
+  if (
+    before.customer.customerId !==
+    after.customer.customerId
+  ) {
+    changedFields.push(
+      "customer",
+    );
+  }
+
+  if (
+    JSON.stringify(
+      before.selectedAccount,
+    ) !==
+    JSON.stringify(
+      after.selectedAccount,
+    )
+  ) {
+    changedFields.push(
+      "selectedAccount",
+    );
+  }
+
+  if (
+    JSON.stringify(
+      before.selectedLoan,
+    ) !==
+    JSON.stringify(
+      after.selectedLoan,
+    )
+  ) {
+    changedFields.push(
+      "selectedLoan",
+    );
+  }
+
+  if (
+    JSON.stringify(
+      before.selectedMovement,
+    ) !==
+    JSON.stringify(
+      after.selectedMovement,
+    )
+  ) {
+    changedFields.push(
+      "selectedMovement",
+    );
+  }
+
+  if (
+    JSON.stringify(
+      before.dateRange,
+    ) !==
+    JSON.stringify(
+      after.dateRange,
+    )
+  ) {
+    changedFields.push(
+      "dateRange",
+    );
+  }
+
+  if (
+    JSON.stringify(
+      before.missingFields,
+    ) !==
+    JSON.stringify(
+      after.missingFields,
+    )
+  ) {
+    changedFields.push(
+      "missingFields",
+    );
+  }
+
+  if (
+    before.status !== after.status
+  ) {
+    changedFields.push(
+      "status",
+    );
+  }
+
+  return changedFields;
+}
+
+async function recordRequestUpdateEvents(
+  requestId: string,
+  before: DocumentRequest,
+  after: DocumentRequest,
+) {
+  const changedFields =
+    getChangedFields(
+      before,
+      after,
+    );
+
+  if (changedFields.length > 0) {
+    await createRequestEvent(
+      requestId,
+      "request_updated",
+      {
+        changedFields,
+        documentType:
+          after.documentType,
+        status: after.status,
+        missingFields:
+          after.missingFields,
+        customerId:
+          after.customer.customerId,
+      },
+    );
+  }
+
+  if (
+    before.status !==
+      "ready_for_confirmation" &&
+    after.status ===
+      "ready_for_confirmation"
+  ) {
+    await createRequestEvent(
+      requestId,
+      "request_ready_for_confirmation",
+      {
+        documentType:
+          after.documentType,
+        customerId:
+          after.customer.customerId,
+      },
+    );
+  }
+}
+
 export async function GET(
   request: NextRequest,
 ) {
@@ -551,7 +696,9 @@ export async function GET(
     }
 
     const storedRequest =
-      await getRequestSession(requestId);
+      await getRequestSession(
+        requestId,
+      );
 
     if (!storedRequest) {
       return NextResponse.json(
@@ -578,8 +725,10 @@ export async function GET(
       receivedMessage: null,
 
       agent: {
-        mode: "session_recovery",
-        provider: "finora-engine",
+        mode:
+          "session_recovery",
+        provider:
+          "finora-engine",
         model: null,
       },
 
@@ -615,6 +764,10 @@ export async function POST(
     const body =
       (await request.json()) as AgentRequestBody;
 
+    /*
+     * Confirmación explícita desde
+     * el botón de la interfaz.
+     */
     if (
       body.action ===
       "confirm_request"
@@ -624,7 +777,8 @@ export async function POST(
           {
             error:
               "No se ha encontrado la sesión de la solicitud.",
-            code: "SESSION_REQUIRED",
+            code:
+              "SESSION_REQUIRED",
           },
           {
             status: 400,
@@ -642,7 +796,8 @@ export async function POST(
           {
             error:
               "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
-            code: "SESSION_NOT_FOUND",
+            code:
+              "SESSION_NOT_FOUND",
           },
           {
             status: 404,
@@ -650,9 +805,12 @@ export async function POST(
         );
       }
 
+      const currentRequest =
+        storedRequest.requestState;
+
       const documentRequest =
         confirmDocumentRequest(
-          storedRequest.requestState,
+          currentRequest,
         );
 
       await saveRequestSession(
@@ -660,8 +818,36 @@ export async function POST(
         documentRequest,
       );
 
+      await recordRequestUpdateEvents(
+        storedRequest.requestId,
+        currentRequest,
+        documentRequest,
+      );
+
+      if (
+        currentRequest.status !==
+          "confirmed" &&
+        documentRequest.status ===
+          "confirmed"
+      ) {
+        await createRequestEvent(
+          storedRequest.requestId,
+          "request_confirmed",
+          {
+            documentType:
+              documentRequest.documentType,
+
+            customerId:
+              documentRequest.customer
+                .customerId,
+          },
+        );
+      }
+
       const nextAction =
-        getNextAction(documentRequest);
+        getNextAction(
+          documentRequest,
+        );
 
       return NextResponse.json({
         requestId:
@@ -670,19 +856,25 @@ export async function POST(
         receivedMessage: null,
 
         agent: {
-          mode: "deterministic",
-          provider: "finora-engine",
+          mode:
+            "deterministic",
+          provider:
+            "finora-engine",
           model: null,
         },
 
         extraction: null,
+
         requestState:
           documentRequest,
+
         nextAction,
       });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (
+      !process.env.OPENAI_API_KEY
+    ) {
       return NextResponse.json(
         {
           error:
@@ -710,6 +902,7 @@ export async function POST(
     }
 
     let storedRequest;
+    let wasCreated = false;
 
     if (body.requestId) {
       storedRequest =
@@ -722,7 +915,8 @@ export async function POST(
           {
             error:
               "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
-            code: "SESSION_NOT_FOUND",
+            code:
+              "SESSION_NOT_FOUND",
           },
           {
             status: 404,
@@ -732,7 +926,38 @@ export async function POST(
     } else {
       storedRequest =
         await createRequestSession();
+
+      wasCreated = true;
+
+      await createRequestEvent(
+        storedRequest.requestId,
+        "session_created",
+        {
+          initialStatus:
+            storedRequest.requestState
+              .status,
+        },
+      );
     }
+
+    /*
+     * No guardamos el texto completo del
+     * mensaje en auditoría.
+     *
+     * Registramos que existió una entrada
+     * de usuario, pero evitamos duplicar
+     * innecesariamente posibles datos
+     * sensibles en request_events.
+     */
+    await createRequestEvent(
+      storedRequest.requestId,
+      "message_received",
+      {
+        channel: "chat",
+        createdSession:
+          wasCreated,
+      },
+    );
 
     const currentRequest =
       storedRequest.requestState;
@@ -742,7 +967,9 @@ export async function POST(
       .slice(0, 10);
 
     const currentNextAction =
-      getNextAction(currentRequest);
+      getNextAction(
+        currentRequest,
+      );
 
     const response =
       await openai.responses.create({
@@ -857,16 +1084,16 @@ Return exactly this JSON shape:
         response.output_text,
       );
 
-    /*
-     * OpenAI interpreta el lenguaje.
-     * El motor determinista añade después
-     * el contexto de negocio necesario para
-     * resolver ambigüedades.
-     */
     const extraction =
       normalizeExtractionForContext(
         currentRequest,
         rawExtraction,
+      );
+
+    const attemptedCustomerChange =
+      isAttemptedCustomerChange(
+        currentRequest,
+        extraction,
       );
 
     let documentRequest =
@@ -877,11 +1104,22 @@ Return exactly this JSON shape:
       );
 
     if (
+      attemptedCustomerChange
+    ) {
+      await createRequestEvent(
+        storedRequest.requestId,
+        "customer_change_rejected",
+        {
+          existingCustomerId:
+            currentRequest.customer
+              .customerId,
+        },
+      );
+    }
+
+    if (
       extraction.confirmRequest &&
-      !isAttemptedCustomerChange(
-        currentRequest,
-        extraction,
-      )
+      !attemptedCustomerChange
     ) {
       documentRequest =
         confirmDocumentRequest(
@@ -901,21 +1139,51 @@ Return exactly this JSON shape:
       documentRequest,
     );
 
+    await recordRequestUpdateEvents(
+      storedRequest.requestId,
+      currentRequest,
+      documentRequest,
+    );
+
+    if (
+      currentRequest.status !==
+        "confirmed" &&
+      documentRequest.status ===
+        "confirmed"
+    ) {
+      await createRequestEvent(
+        storedRequest.requestId,
+        "request_confirmed",
+        {
+          documentType:
+            documentRequest.documentType,
+
+          customerId:
+            documentRequest.customer
+              .customerId,
+        },
+      );
+    }
+
     return NextResponse.json({
       requestId:
         storedRequest.requestId,
 
-      receivedMessage: message,
+      receivedMessage:
+        message,
 
       agent: {
         mode: "openai",
         provider: "openai",
-        model: "gpt-5.6-luna",
+        model:
+          "gpt-5.6-luna",
       },
 
       extraction,
+
       requestState:
         documentRequest,
+
       nextAction,
     });
   } catch (error) {
