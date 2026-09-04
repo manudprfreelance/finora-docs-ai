@@ -4,7 +4,7 @@ import {
 
 import {
   documentProcessingService,
-} from "@/lib/server/local-document-processing-service";
+} from "@/lib/server/n8n-document-processing-service";
 
 import {
   createRequestEvent,
@@ -45,11 +45,6 @@ export async function processConfirmedRequest(
     );
   }
 
-  /*
-   * Primera transición:
-   *
-   * confirmed -> processing
-   */
   const processingRequest: DocumentRequest = {
     ...storedRequest.requestState,
     status: "processing",
@@ -78,15 +73,6 @@ export async function processConfirmedRequest(
   );
 
   try {
-    /*
-     * El servicio concreto está desacoplado.
-     *
-     * Hoy:
-     * LocalDocumentProcessingService
-     *
-     * Después:
-     * N8nDocumentProcessingService
-     */
     const processingResult =
       await documentProcessingService.process(
         requestId,
@@ -190,11 +176,6 @@ export async function processConfirmedRequest(
       error: null,
     };
   } catch (error) {
-    /*
-     * Si el proveedor lanza una excepción
-     * inesperada también debemos dejar la
-     * solicitud en un estado consistente.
-     */
     const errorMessage =
       error instanceof Error
         ? error.message
@@ -221,7 +202,7 @@ export async function processConfirmedRequest(
           failedRequest.customer
             .customerId,
 
-        provider: null,
+        provider: "n8n",
 
         externalReference: null,
 
@@ -236,7 +217,7 @@ export async function processConfirmedRequest(
       requestId,
       requestState:
         failedRequest,
-      provider: null,
+      provider: "n8n",
       externalReference: null,
       output: {},
       error:
