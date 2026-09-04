@@ -30,6 +30,10 @@ import {
   createRequestEvent,
 } from "@/lib/server/request-event-repository";
 
+import {
+  processConfirmedRequest,
+} from "@/lib/server/request-processing-dispatcher";
+
 interface AgentRequestBody {
   message?: string;
   requestId?: string | null;
@@ -645,7 +649,8 @@ async function recordRequestUpdateEvents(
         changedFields,
         documentType:
           after.documentType,
-        status: after.status,
+        status:
+          after.status,
         missingFields:
           after.missingFields,
         customerId:
@@ -673,6 +678,44 @@ async function recordRequestUpdateEvents(
   }
 }
 
+async function processJustConfirmedRequest(
+  requestId: string,
+) {
+  const processingResult =
+    await processConfirmedRequest(
+      requestId,
+    );
+
+  if (
+    processingResult.requestState.status ===
+    "completed"
+  ) {
+    return {
+      requestState:
+        processingResult.requestState,
+
+      nextAction: {
+        type:
+          "request_processing_completed",
+        message:
+          "Solicitud procesada correctamente. El documento ya está preparado.",
+      },
+    };
+  }
+
+  return {
+    requestState:
+      processingResult.requestState,
+
+    nextAction: {
+      type:
+        "request_processing_failed",
+      message:
+        "La solicitud se ha confirmado, pero se ha producido un error durante el procesamiento.",
+    },
+  };
+}
+
 export async function GET(
   request: NextRequest,
 ) {
@@ -687,7 +730,8 @@ export async function GET(
         {
           error:
             "El identificador de la solicitud es obligatorio.",
-          code: "SESSION_REQUIRED",
+          code:
+            "SESSION_REQUIRED",
         },
         {
           status: 400,
@@ -705,7 +749,8 @@ export async function GET(
         {
           error:
             "No se ha encontrado la sesión de la solicitud.",
-          code: "SESSION_NOT_FOUND",
+          code:
+            "SESSION_NOT_FOUND",
         },
         {
           status: 404,
@@ -824,12 +869,13 @@ export async function POST(
         documentRequest,
       );
 
-      if (
+      const wasJustConfirmed =
         currentRequest.status !==
           "confirmed" &&
         documentRequest.status ===
-          "confirmed"
-      ) {
+          "confirmed";
+
+      if (wasJustConfirmed) {
         await createRequestEvent(
           storedRequest.requestId,
           "request_confirmed",
@@ -842,6 +888,44 @@ export async function POST(
                 .customerId,
           },
         );
+
+        /*
+         * Una solicitud confirmada pasa
+         * inmediatamente al dispatcher.
+         *
+         * Con el simulador local:
+         *
+         * confirmed
+         * -> processing
+         * -> completed
+         */
+        const processed =
+          await processJustConfirmedRequest(
+            storedRequest.requestId,
+          );
+
+        return NextResponse.json({
+          requestId:
+            storedRequest.requestId,
+
+          receivedMessage: null,
+
+          agent: {
+            mode:
+              "deterministic",
+            provider:
+              "finora-engine",
+            model: null,
+          },
+
+          extraction: null,
+
+          requestState:
+            processed.requestState,
+
+          nextAction:
+            processed.nextAction,
+        });
       }
 
       const nextAction =
@@ -941,13 +1025,9 @@ export async function POST(
     }
 
     /*
-     * No guardamos el texto completo del
-     * mensaje en auditoría.
-     *
-     * Registramos que existió una entrada
-     * de usuario, pero evitamos duplicar
-     * innecesariamente posibles datos
-     * sensibles en request_events.
+     * Registramos la existencia del mensaje,
+     * pero no duplicamos el texto completo
+     * dentro de la auditoría.
      */
     await createRequestEvent(
       storedRequest.requestId,
@@ -1145,12 +1225,13 @@ Return exactly this JSON shape:
       documentRequest,
     );
 
-    if (
+    const wasJustConfirmed =
       currentRequest.status !==
         "confirmed" &&
       documentRequest.status ===
-        "confirmed"
-    ) {
+        "confirmed";
+
+    if (wasJustConfirmed) {
       await createRequestEvent(
         storedRequest.requestId,
         "request_confirmed",
@@ -1163,6 +1244,39 @@ Return exactly this JSON shape:
               .customerId,
         },
       );
+
+      /*
+       * También procesamos cuando la
+       * confirmación llega mediante
+       * lenguaje natural.
+       */
+      const processed =
+        await processJustConfirmedRequest(
+          storedRequest.requestId,
+        );
+
+      return NextResponse.json({
+        requestId:
+          storedRequest.requestId,
+
+        receivedMessage:
+          message,
+
+        agent: {
+          mode: "openai",
+          provider: "openai",
+          model:
+            "gpt-5.6-luna",
+        },
+
+        extraction,
+
+        requestState:
+          processed.requestState,
+
+        nextAction:
+          processed.nextAction,
+      });
     }
 
     return NextResponse.json({

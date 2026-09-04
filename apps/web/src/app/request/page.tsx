@@ -76,6 +76,55 @@ const missingFieldLabels: Record<
   movement: "Operación",
 };
 
+function getStatusLabel(
+  status: DocumentRequest["status"],
+): string {
+  switch (status) {
+    case "collecting_information":
+      return "Recopilando información";
+
+    case "ready_for_confirmation":
+      return "Lista para confirmar";
+
+    case "confirmed":
+      return "Confirmada";
+
+    case "processing":
+      return "Procesando";
+
+    case "completed":
+      return "Completada";
+
+    case "failed":
+      return "Fallida";
+
+    default:
+      return status;
+  }
+}
+
+function getRecoveryMessage(
+  requestState: DocumentRequest,
+  fallbackMessage: string,
+): string {
+  switch (requestState.status) {
+    case "processing":
+      return "Tu solicitud está siendo procesada.";
+
+    case "completed":
+      return "Tu solicitud ya ha sido procesada correctamente y el documento está preparado.";
+
+    case "failed":
+      return "La solicitud está registrada, pero se produjo un error durante su procesamiento.";
+
+    case "confirmed":
+      return "Tu solicitud está confirmada y preparada para su procesamiento.";
+
+    default:
+      return fallbackMessage;
+  }
+}
+
 export default function RequestPage() {
   const [messages, setMessages] =
     useState<ChatMessage[]>([
@@ -112,13 +161,36 @@ export default function RequestPage() {
   const [error, setError] =
     useState<string | null>(null);
 
+  const isReadyForConfirmation =
+    requestState?.status ===
+    "ready_for_confirmation";
+
   const isConfirmed =
     requestState?.status ===
     "confirmed";
 
-  const isReadyForConfirmation =
+  const isProcessing =
     requestState?.status ===
-    "ready_for_confirmation";
+    "processing";
+
+  const isCompleted =
+    requestState?.status ===
+    "completed";
+
+  const isFailed =
+    requestState?.status ===
+    "failed";
+
+  /*
+   * Una vez que la solicitud entra en su
+   * fase de procesamiento ya no seguimos
+   * recopilando información mediante chat.
+   */
+  const isConversationClosed =
+    isConfirmed ||
+    isProcessing ||
+    isCompleted ||
+    isFailed;
 
   /*
    * La cuenta no forma parte del resumen
@@ -134,11 +206,6 @@ export default function RequestPage() {
    *
    * 1. si el motor lo considera pendiente, o
    * 2. si realmente existe alguna fecha.
-   *
-   * Es importante comprobar primero que
-   * dateRange no sea null. De lo contrario,
-   * optional chaining devolvería undefined y
-   * "undefined !== null" sería true.
    */
   const shouldShowPeriod =
     requestState !== null &&
@@ -284,7 +351,10 @@ export default function RequestPage() {
             id: Date.now() + 1,
             role: "assistant",
             content:
-              data.nextAction.message,
+              getRecoveryMessage(
+                data.requestState,
+                data.nextAction.message,
+              ),
           },
         ]);
       } catch (recoveryError) {
@@ -383,7 +453,7 @@ export default function RequestPage() {
       !message ||
       isLoading ||
       isRecoveringSession ||
-      isConfirmed
+      isConversationClosed
     ) {
       return;
     }
@@ -606,17 +676,55 @@ export default function RequestPage() {
               </div>
             )}
 
-            {isConfirmed ? (
+            {isConfirmed && (
               <div className="rounded-2xl border border-emerald-800/70 bg-emerald-950/30 px-5 py-4">
                 <p className="font-medium text-emerald-300">
                   Solicitud confirmada
                 </p>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  Esta solicitud ya está preparada para su procesamiento.
+                  La solicitud está preparada para iniciar su procesamiento.
                 </p>
               </div>
-            ) : (
+            )}
+
+            {isProcessing && (
+              <div className="rounded-2xl border border-sky-900/70 bg-sky-950/30 px-5 py-4">
+                <p className="font-medium text-sky-300">
+                  Solicitud en procesamiento
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Finora está procesando la solicitud y preparando el documento.
+                </p>
+              </div>
+            )}
+
+            {isCompleted && (
+              <div className="rounded-2xl border border-emerald-800/70 bg-emerald-950/30 px-5 py-4">
+                <p className="font-medium text-emerald-300">
+                  Solicitud completada
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  El procesamiento ha finalizado correctamente y el documento está preparado.
+                </p>
+              </div>
+            )}
+
+            {isFailed && (
+              <div className="rounded-2xl border border-red-900/70 bg-red-950/30 px-5 py-4">
+                <p className="font-medium text-red-300">
+                  Error de procesamiento
+                </p>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  La solicitud fue registrada, pero no pudo completarse correctamente.
+                </p>
+              </div>
+            )}
+
+            {!isConversationClosed && (
               <form
                 onSubmit={
                   handleSubmit
@@ -780,44 +888,45 @@ export default function RequestPage() {
                 <p
                   className={`mt-1 font-medium ${
                     requestState.status ===
-                    "confirmed"
-                      ? "text-emerald-300"
-                      : "text-emerald-400"
+                    "failed"
+                      ? "text-red-300"
+                      : requestState.status ===
+                          "processing"
+                        ? "text-sky-300"
+                        : "text-emerald-400"
                   }`}
                 >
-                  {requestState.status ===
-                  "confirmed"
-                    ? "Confirmada"
-                    : requestState.status ===
-                        "ready_for_confirmation"
-                      ? "Lista para confirmar"
-                      : "Recopilando información"}
+                  {getStatusLabel(
+                    requestState.status,
+                  )}
                 </p>
               </div>
 
               {requestState.missingFields
-                .length > 0 && (
-                <div>
-                  <p className="text-xs text-slate-500">
-                    Información pendiente
-                  </p>
+                .length > 0 &&
+                requestState.status ===
+                  "collecting_information" && (
+                  <div>
+                    <p className="text-xs text-slate-500">
+                      Información pendiente
+                    </p>
 
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {requestState.missingFields.map(
-                      (field) => (
-                        <span
-                          key={field}
-                          className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
-                        >
-                          {missingFieldLabels[
-                            field
-                          ] ?? field}
-                        </span>
-                      ),
-                    )}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {requestState.missingFields.map(
+                        (field) => (
+                          <span
+                            key={field}
+                            className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
+                          >
+                            {missingFieldLabels[
+                              field
+                            ] ?? field}
+                          </span>
+                        ),
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
               {requestId && (
                 <div className="border-t border-slate-800 pt-5">

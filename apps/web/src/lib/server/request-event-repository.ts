@@ -8,6 +8,9 @@ export type RequestEventType =
   | "request_updated"
   | "request_ready_for_confirmation"
   | "request_confirmed"
+  | "request_processing_started"
+  | "request_processing_completed"
+  | "request_processing_failed"
   | "customer_change_rejected";
 
 export interface RequestEvent {
