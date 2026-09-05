@@ -39,7 +39,8 @@ export class N8nDocumentProcessingService
     }
 
     const webhookUrl =
-      process.env.N8N_DOCUMENT_PROCESSING_WEBHOOK_URL;
+      process.env
+        .N8N_DOCUMENT_PROCESSING_WEBHOOK_URL;
 
     if (!webhookUrl) {
       return {
@@ -52,6 +53,65 @@ export class N8nDocumentProcessingService
           "N8N_DOCUMENT_PROCESSING_WEBHOOK_URL is not configured.",
       };
     }
+
+    const selectedAccountId =
+      requestState.selectedAccount
+        ?.accountId ?? null;
+
+    const dateFrom =
+      requestState.dateRange?.from ??
+      null;
+
+    const dateTo =
+      requestState.dateRange?.to ??
+      null;
+
+    const accountMovements =
+      requestState.availableMovements
+        .filter((movement) => {
+          if (
+            selectedAccountId &&
+            movement.accountId !==
+              selectedAccountId
+          ) {
+            return false;
+          }
+
+          if (
+            dateFrom &&
+            movement.date < dateFrom
+          ) {
+            return false;
+          }
+
+          if (
+            dateTo &&
+            movement.date > dateTo
+          ) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((movement) => ({
+          movementId:
+            movement.movementId,
+
+          accountId:
+            movement.accountId,
+
+          date:
+            movement.date,
+
+          description:
+            movement.description,
+
+          amount:
+            movement.amount,
+
+          currency:
+            movement.currency,
+        }));
 
     try {
       const response = await fetch(
@@ -74,20 +134,63 @@ export class N8nDocumentProcessingService
               requestState.customer
                 .customerId,
 
+            customerName:
+              requestState.customer
+                .name ?? null,
+
+            customerDni:
+              requestState.customer
+                .dni ?? null,
+
             accountId:
+              selectedAccountId,
+
+            accountName:
               requestState.selectedAccount
-                ?.accountId ?? null,
+                ?.accountName ?? null,
+
+            maskedAccountNumber:
+              requestState.selectedAccount
+                ?.maskedAccountNumber ??
+              null,
 
             loanId:
               requestState.selectedLoan
                 ?.loanId ?? null,
 
+            loanName:
+              requestState.selectedLoan
+                ?.loanName ?? null,
+
+            maskedLoanNumber:
+              requestState.selectedLoan
+                ?.maskedLoanNumber ??
+              null,
+
             movementId:
               requestState.selectedMovement
                 ?.movementId ?? null,
 
+            movementDescription:
+              requestState.selectedMovement
+                ?.description ?? null,
+
+            movementAmount:
+              requestState.selectedMovement
+                ?.amount ?? null,
+
+            movementCurrency:
+              requestState.selectedMovement
+                ?.currency ?? null,
+
+            movementDate:
+              requestState.selectedMovement
+                ?.date ?? null,
+
             dateRange:
               requestState.dateRange,
+
+            accountMovements,
           }),
         },
       );
@@ -105,7 +208,8 @@ export class N8nDocumentProcessingService
       }
 
       const data =
-        (await response.json()) as N8nProcessingResponse;
+        (await response.json()) as
+          N8nProcessingResponse;
 
       if (
         data.status !==
@@ -115,12 +219,15 @@ export class N8nDocumentProcessingService
           requestId,
           status: "failed",
           provider: "n8n",
+
           externalReference:
             data.externalReference ??
             null,
+
           output: {
             ...data,
           },
+
           error:
             `n8n returned unexpected status: ${data.status ?? "unknown"}.`,
         };

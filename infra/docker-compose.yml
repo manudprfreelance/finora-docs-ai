@@ -25,5 +25,33 @@ services:
       timeout: 5s
       retries: 10
 
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: finora-gotenberg
+    restart: unless-stopped
+
+    ports:
+      - "3001:3000"
+
+  minio:
+    image: minio/minio:latest
+    container_name: finora-minio
+    restart: unless-stopped
+
+    command:
+      server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: finora
+      MINIO_ROOT_PASSWORD: finora-development-password
+
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+    volumes:
+      - finora_minio_data:/data
+
 volumes:
   finora_postgres_data:
+  finora_minio_data:
