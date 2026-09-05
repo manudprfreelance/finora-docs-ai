@@ -5,6 +5,8 @@ import {
 
 import {
   getAccountStatementPdf,
+  getLoanAmortizationPdf,
+  getSwiftConfirmationPdf,
 } from "@/lib/server/document-storage-service";
 
 import {
@@ -40,19 +42,6 @@ export async function GET(
       );
     }
 
-    /*
-     * Recuperamos la solicitud desde
-     * PostgreSQL.
-     *
-     * El navegador nunca decide:
-     * - qué customerId usar,
-     * - qué bucket consultar,
-     * - qué objectKey descargar.
-     *
-     * Toda esa información se deriva
-     * desde el estado persistido del
-     * servidor.
-     */
     const storedRequest =
       await getRequestSession(
         requestId,
@@ -75,10 +64,6 @@ export async function GET(
     const requestState =
       storedRequest.requestState;
 
-    /*
-     * Solo entregamos documentos cuyo
-     * procesamiento haya finalizado.
-     */
     if (
       requestState.status !==
       "completed"
@@ -92,32 +77,6 @@ export async function GET(
         },
         {
           status: 409,
-        },
-      );
-    }
-
-    /*
-     * En este bloque implementamos
-     * exclusivamente el camino del
-     * extracto de cuenta.
-     *
-     * Loan amortization y SWIFT
-     * se incorporarán después usando
-     * el mismo patrón.
-     */
-    if (
-      requestState.documentType !==
-      "account_statement"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "La descarga todavía no está disponible para este tipo de documento.",
-          code:
-            "DOCUMENT_TYPE_NOT_SUPPORTED",
-        },
-        {
-          status: 400,
         },
       );
     }
@@ -140,21 +99,51 @@ export async function GET(
       );
     }
 
-    /*
-     * La ruta de MinIO se calcula
-     * exclusivamente en el servidor:
-     *
-     * customers/
-     *   customer-001/
-     *     account-statements/
-     *       requestId/
-     *         account-statement-requestId.pdf
-     */
-    const document =
-      await getAccountStatementPdf(
-        customerId,
-        requestId,
-      );
+    let document;
+
+    switch (
+      requestState.documentType
+    ) {
+      case "account_statement":
+        document =
+          await getAccountStatementPdf(
+            customerId,
+            requestId,
+          );
+
+        break;
+
+      case "loan_amortization":
+        document =
+          await getLoanAmortizationPdf(
+            customerId,
+            requestId,
+          );
+
+        break;
+
+      case "swift_confirmation":
+        document =
+          await getSwiftConfirmationPdf(
+            customerId,
+            requestId,
+          );
+
+        break;
+
+      default:
+        return NextResponse.json(
+          {
+            error:
+              "La descarga todavía no está disponible para este tipo de documento.",
+            code:
+              "DOCUMENT_TYPE_NOT_SUPPORTED",
+          },
+          {
+            status: 400,
+          },
+        );
+    }
 
     if (!document) {
       return NextResponse.json(
@@ -170,11 +159,6 @@ export async function GET(
       );
     }
 
-    /*
-     * Buffer permanece únicamente en el
-     * backend. El navegador recibe una
-     * respuesta HTTP PDF convencional.
-     */
     const pdfBuffer =
       Buffer.from(
         document.body,
@@ -195,11 +179,6 @@ export async function GET(
           "Content-Length":
             pdfBuffer.length.toString(),
 
-          /*
-           * La documentación bancaria no
-           * debe quedar cacheada de manera
-           * compartida.
-           */
           "Cache-Control":
             "private, no-store, max-age=0",
 

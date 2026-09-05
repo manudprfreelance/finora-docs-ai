@@ -1,2 +1,5 @@
 # Local infrastructure secrets
 infra/.env
+.env
+.env.*
+!.env.example

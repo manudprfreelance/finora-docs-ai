@@ -40,12 +40,61 @@ const customers: MockCustomer[] = [
         loanName: "Mortgage loan",
         maskedLoanNumber: "•••• 4401",
         loanType: "mortgage",
+
+        financialDetails: {
+          currency: "EUR",
+
+          originalPrincipal: 240000,
+
+          outstandingPrincipal:
+            198742.31,
+
+          annualInterestRate: 3.2,
+
+          startDate: "2022-03-15",
+
+          maturityDate: "2047-03-15",
+
+          paymentFrequency:
+            "monthly",
+
+          totalInstallments: 300,
+
+          paidInstallments: 54,
+
+          installmentAmount: 1163.42,
+        },
       },
+
       {
         loanId: "loan-7721",
         loanName: "Personal loan",
         maskedLoanNumber: "•••• 7721",
         loanType: "personal",
+
+        financialDetails: {
+          currency: "EUR",
+
+          originalPrincipal: 18000,
+
+          outstandingPrincipal:
+            9724.58,
+
+          annualInterestRate: 6.75,
+
+          startDate: "2024-01-10",
+
+          maturityDate: "2029-01-10",
+
+          paymentFrequency:
+            "monthly",
+
+          totalInstallments: 60,
+
+          paidInstallments: 32,
+
+          installmentAmount: 354.87,
+        },
       },
     ],
 
@@ -137,6 +186,47 @@ const customers: MockCustomer[] = [
         description: "International transfer to ACME GmbH",
         amount: -2500,
         currency: "EUR",
+
+        swiftDetails: {
+          uetr:
+            "8f2c1a46-7d33-4c8f-9a4e-1c8e61a24f01",
+
+          transactionReference:
+            "FIN-SWIFT-20260820-001",
+
+          orderingCustomerName:
+            "Carlos García López",
+
+          orderingAccount:
+            "•••• 0236",
+
+          beneficiaryName:
+            "ACME GmbH",
+
+          beneficiaryIban:
+            "DE89370400440532013000",
+
+          beneficiaryBankName:
+            "Deutsche Bank AG",
+
+          beneficiaryBankBic:
+            "DEUTDEFFXXX",
+
+          beneficiaryBankCountry:
+            "Germany",
+
+          remittanceInformation:
+            "Payment of invoice ACME-2026-0817",
+
+          valueDate:
+            "2026-08-20",
+
+          charges:
+            "SHA",
+
+          transferStatus:
+            "settled",
+        },
       },
       {
         movementId: "movement-012",
@@ -166,7 +256,8 @@ const customers: MockCustomer[] = [
         movementId: "movement-015",
         accountId: "account-0236",
         date: "2026-08-27",
-        description: "Streaming service subscription",
+        description:
+          "Streaming service subscription",
         amount: -12.99,
         currency: "EUR",
       },
@@ -191,7 +282,8 @@ const customers: MockCustomer[] = [
         movementId: "movement-018",
         accountId: "account-8174",
         date: "2026-08-04",
-        description: "Investment fund distribution",
+        description:
+          "Investment fund distribution",
         amount: 185.75,
         currency: "EUR",
       },
@@ -199,7 +291,8 @@ const customers: MockCustomer[] = [
         movementId: "movement-019",
         accountId: "account-8174",
         date: "2026-08-15",
-        description: "Investment subscription",
+        description:
+          "Investment subscription",
         amount: -5000,
         currency: "EUR",
       },
@@ -234,6 +327,30 @@ const customers: MockCustomer[] = [
         loanName: "Personal loan",
         maskedLoanNumber: "•••• 1188",
         loanType: "personal",
+
+        financialDetails: {
+          currency: "EUR",
+
+          originalPrincipal: 12000,
+
+          outstandingPrincipal:
+            6431.72,
+
+          annualInterestRate: 5.9,
+
+          startDate: "2024-06-05",
+
+          maturityDate: "2028-06-05",
+
+          paymentFrequency:
+            "monthly",
+
+          totalInstallments: 48,
+
+          paidInstallments: 27,
+
+          installmentAmount: 281.36,
+        },
       },
     ],
 
@@ -310,6 +427,47 @@ const customers: MockCustomer[] = [
           "International transfer to Global Supplies Ltd.",
         amount: -1200,
         currency: "EUR",
+
+        swiftDetails: {
+          uetr:
+            "49c18f25-cc5d-4d14-8e89-20d7b1f2d804",
+
+          transactionReference:
+            "FIN-SWIFT-20260822-002",
+
+          orderingCustomerName:
+            "Laura Martínez Ruiz",
+
+          orderingAccount:
+            "•••• 4412",
+
+          beneficiaryName:
+            "Global Supplies Ltd.",
+
+          beneficiaryIban:
+            "GB29NWBK60161331926819",
+
+          beneficiaryBankName:
+            "NatWest Bank",
+
+          beneficiaryBankBic:
+            "NWBKGB2L",
+
+          beneficiaryBankCountry:
+            "United Kingdom",
+
+          remittanceInformation:
+            "Payment for commercial supplies",
+
+          valueDate:
+            "2026-08-22",
+
+          charges:
+            "SHA",
+
+          transferStatus:
+            "settled",
+        },
       },
       {
         movementId: "movement-030",

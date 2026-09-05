@@ -132,6 +132,28 @@ function getRecoveryMessage(
   }
 }
 
+function getDefaultPdfFileName(
+  documentType: DocumentType,
+  requestId: string,
+): string {
+  switch (documentType) {
+    case "account_statement":
+      return `account-statement-${requestId}.pdf`;
+
+    case "loan_amortization":
+      return `loan-amortization-${requestId}.pdf`;
+
+    case "swift_confirmation":
+      return `swift-confirmation-${requestId}.pdf`;
+
+    case "position_statement":
+      return `position-statement-${requestId}.pdf`;
+
+    default:
+      return `finora-document-${requestId}.pdf`;
+  }
+}
+
 export default function RequestPage() {
   const [
     messages,
@@ -215,20 +237,24 @@ export default function RequestPage() {
     "failed";
 
   /*
-   * De momento la descarga real está
-   * implementada para el primer camino:
-   * account_statement.
-   *
-   * Cuando terminemos loan amortization
-   * y SWIFT ampliaremos esta condición.
+   * Tipos de documento que actualmente
+   * disponen de generación real de PDF,
+   * almacenamiento en MinIO y descarga
+   * desde Finora.
    */
+  const hasDownloadableDocumentType =
+    requestState?.documentType ===
+      "account_statement" ||
+    requestState?.documentType ===
+      "loan_amortization" ||
+    requestState?.documentType ===
+      "swift_confirmation";
+
   const canDownloadDocument =
     Boolean(
       requestId &&
         isCompleted &&
-        requestState
-          ?.documentType ===
-          "account_statement",
+        hasDownloadableDocumentType,
     );
 
   /*
@@ -657,6 +683,7 @@ export default function RequestPage() {
   async function handleDownloadDocument() {
     if (
       !requestId ||
+      !requestState ||
       !canDownloadDocument ||
       isDownloadingDocument
     ) {
@@ -724,7 +751,10 @@ export default function RequestPage() {
 
       const fileName =
         fileNameMatch?.[1] ??
-        `account-statement-${requestId}.pdf`;
+        getDefaultPdfFileName(
+          requestState.documentType,
+          requestId,
+        );
 
       const downloadUrl =
         window.URL.createObjectURL(

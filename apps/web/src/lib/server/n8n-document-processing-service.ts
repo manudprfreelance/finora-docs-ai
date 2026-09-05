@@ -5,6 +5,7 @@ import {
 
 import {
   DocumentRequest,
+  LoanFinancialDetails,
 } from "@/lib/request-types";
 
 interface N8nProcessingResponse {
@@ -14,6 +15,187 @@ interface N8nProcessingResponse {
   status?: string;
   processedAt?: string;
   externalReference?: string;
+}
+
+interface LoanAmortizationInstallment {
+  installmentNumber: number;
+  paymentDate: string;
+  openingPrincipal: number;
+  installmentAmount: number;
+  principalAmount: number;
+  interestAmount: number;
+  closingPrincipal: number;
+  currency: string;
+}
+
+function roundMoney(
+  value: number,
+): number {
+  return (
+    Math.round(
+      (value + Number.EPSILON) *
+        100,
+    ) / 100
+  );
+}
+
+function addMonths(
+  isoDate: string,
+  months: number,
+): string {
+  const [
+    year,
+    month,
+    day,
+  ] = isoDate
+    .split("-")
+    .map(Number);
+
+  const date =
+    new Date(
+      Date.UTC(
+        year,
+        month - 1 + months,
+        day,
+      ),
+    );
+
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+function buildLoanAmortizationSchedule(
+  financialDetails:
+    LoanFinancialDetails,
+): LoanAmortizationInstallment[] {
+  if (
+    financialDetails
+      .paymentFrequency !==
+    "monthly"
+  ) {
+    return [];
+  }
+
+  const monthlyInterestRate =
+    financialDetails
+      .annualInterestRate /
+    100 /
+    12;
+
+  const remainingInstallments =
+    Math.max(
+      financialDetails
+        .totalInstallments -
+        financialDetails
+          .paidInstallments,
+      0,
+    );
+
+  let outstandingPrincipal =
+    financialDetails
+      .outstandingPrincipal;
+
+  const schedule:
+    LoanAmortizationInstallment[] =
+    [];
+
+  for (
+    let index = 0;
+    index <
+      remainingInstallments;
+    index += 1
+  ) {
+    if (
+      outstandingPrincipal <= 0
+    ) {
+      break;
+    }
+
+    const installmentNumber =
+      financialDetails
+        .paidInstallments +
+      index +
+      1;
+
+    const paymentDate =
+      addMonths(
+        financialDetails
+          .startDate,
+        installmentNumber,
+      );
+
+    const openingPrincipal =
+      roundMoney(
+        outstandingPrincipal,
+      );
+
+    const interestAmount =
+      roundMoney(
+        openingPrincipal *
+          monthlyInterestRate,
+      );
+
+    let installmentAmount =
+      financialDetails
+        .installmentAmount;
+
+    let principalAmount =
+      roundMoney(
+        installmentAmount -
+          interestAmount,
+      );
+
+    if (
+      principalAmount >
+      openingPrincipal
+    ) {
+      principalAmount =
+        openingPrincipal;
+
+      installmentAmount =
+        roundMoney(
+          principalAmount +
+            interestAmount,
+        );
+    }
+
+    if (
+      principalAmount <= 0
+    ) {
+      break;
+    }
+
+    const closingPrincipal =
+      roundMoney(
+        Math.max(
+          openingPrincipal -
+            principalAmount,
+          0,
+        ),
+      );
+
+    schedule.push({
+      installmentNumber,
+      paymentDate,
+      openingPrincipal,
+      installmentAmount:
+        roundMoney(
+          installmentAmount,
+        ),
+      principalAmount,
+      interestAmount,
+      closingPrincipal,
+      currency:
+        financialDetails
+          .currency,
+    });
+
+    outstandingPrincipal =
+      closingPrincipal;
+  }
+
+  return schedule;
 }
 
 export class N8nDocumentProcessingService
@@ -113,6 +295,24 @@ export class N8nDocumentProcessingService
             movement.currency,
         }));
 
+    const loanFinancialDetails =
+      requestState.selectedLoan
+        ?.financialDetails ?? null;
+
+    const loanAmortizationSchedule =
+      loanFinancialDetails
+        ? buildLoanAmortizationSchedule(
+            loanFinancialDetails,
+          )
+        : [];
+
+    const selectedMovement =
+      requestState.selectedMovement;
+
+    const swiftDetails =
+      selectedMovement
+        ?.swiftDetails ?? null;
+
     try {
       const response = await fetch(
         webhookUrl,
@@ -146,46 +346,67 @@ export class N8nDocumentProcessingService
               selectedAccountId,
 
             accountName:
-              requestState.selectedAccount
-                ?.accountName ?? null,
+              requestState
+                .selectedAccount
+                ?.accountName ??
+              null,
 
             maskedAccountNumber:
-              requestState.selectedAccount
+              requestState
+                .selectedAccount
                 ?.maskedAccountNumber ??
               null,
 
             loanId:
-              requestState.selectedLoan
+              requestState
+                .selectedLoan
                 ?.loanId ?? null,
 
             loanName:
-              requestState.selectedLoan
+              requestState
+                .selectedLoan
                 ?.loanName ?? null,
 
             maskedLoanNumber:
-              requestState.selectedLoan
+              requestState
+                .selectedLoan
                 ?.maskedLoanNumber ??
               null,
 
+            loanFinancialDetails,
+
+            loanAmortizationSchedule,
+
             movementId:
-              requestState.selectedMovement
+              selectedMovement
                 ?.movementId ?? null,
 
             movementDescription:
-              requestState.selectedMovement
+              selectedMovement
                 ?.description ?? null,
 
             movementAmount:
-              requestState.selectedMovement
+              selectedMovement
                 ?.amount ?? null,
 
             movementCurrency:
-              requestState.selectedMovement
+              selectedMovement
                 ?.currency ?? null,
 
             movementDate:
-              requestState.selectedMovement
+              selectedMovement
                 ?.date ?? null,
+
+            /*
+             * Datos SWIFT enriquecidos.
+             *
+             * Solo estarán presentes
+             * cuando el movimiento
+             * seleccionado corresponda
+             * a una transferencia
+             * internacional.
+             */
+            swiftDetails,
 
             dateRange:
               requestState.dateRange,

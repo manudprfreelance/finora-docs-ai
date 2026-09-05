@@ -59,6 +59,32 @@ function buildAccountStatementObjectKey(
   ].join("/");
 }
 
+function buildLoanAmortizationObjectKey(
+  customerId: string,
+  requestId: string,
+): string {
+  return [
+    "customers",
+    customerId,
+    "loan-amortizations",
+    requestId,
+    `loan-amortization-${requestId}.pdf`,
+  ].join("/");
+}
+
+function buildSwiftConfirmationObjectKey(
+  customerId: string,
+  requestId: string,
+): string {
+  return [
+    "customers",
+    customerId,
+    "swift-confirmations",
+    requestId,
+    `swift-confirmation-${requestId}.pdf`,
+  ].join("/");
+}
+
 async function streamToUint8Array(
   body: unknown,
 ): Promise<Uint8Array> {
@@ -86,16 +112,10 @@ async function streamToUint8Array(
   );
 }
 
-export async function getAccountStatementPdf(
-  customerId: string,
-  requestId: string,
+async function getStoredPdf(
+  objectKey: string,
+  fileName: string,
 ): Promise<StoredDocument | null> {
-  const objectKey =
-    buildAccountStatementObjectKey(
-      customerId,
-      requestId,
-    );
-
   const client =
     getS3Client();
 
@@ -127,8 +147,7 @@ export async function getAccountStatementPdf(
         response.ContentType ??
         "application/pdf",
 
-      fileName:
-        `account-statement-${requestId}.pdf`,
+      fileName,
 
       bucket:
         DOCUMENT_BUCKET,
@@ -142,14 +161,60 @@ export async function getAccountStatementPdf(
         : "";
 
     if (
-      errorName ===
-        "NoSuchKey" ||
-      errorName ===
-        "NotFound"
+      errorName === "NoSuchKey" ||
+      errorName === "NotFound"
     ) {
       return null;
     }
 
     throw error;
   }
+}
+
+export async function getAccountStatementPdf(
+  customerId: string,
+  requestId: string,
+): Promise<StoredDocument | null> {
+  const objectKey =
+    buildAccountStatementObjectKey(
+      customerId,
+      requestId,
+    );
+
+  return getStoredPdf(
+    objectKey,
+    `account-statement-${requestId}.pdf`,
+  );
+}
+
+export async function getLoanAmortizationPdf(
+  customerId: string,
+  requestId: string,
+): Promise<StoredDocument | null> {
+  const objectKey =
+    buildLoanAmortizationObjectKey(
+      customerId,
+      requestId,
+    );
+
+  return getStoredPdf(
+    objectKey,
+    `loan-amortization-${requestId}.pdf`,
+  );
+}
+
+export async function getSwiftConfirmationPdf(
+  customerId: string,
+  requestId: string,
+): Promise<StoredDocument | null> {
+  const objectKey =
+    buildSwiftConfirmationObjectKey(
+      customerId,
+      requestId,
+    );
+
+  return getStoredPdf(
+    objectKey,
+    `swift-confirmation-${requestId}.pdf`,
+  );
 }

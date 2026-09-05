@@ -32,24 +32,135 @@ export interface CustomerAccount {
   accountType: string;
 }
 
+export type LoanPaymentFrequency =
+  | "monthly"
+  | "quarterly"
+  | "semiannual"
+  | "annual";
+
+export interface LoanFinancialDetails {
+  currency: string;
+
+  originalPrincipal: number;
+
+  outstandingPrincipal: number;
+
+  annualInterestRate: number;
+
+  startDate: string;
+
+  maturityDate: string;
+
+  paymentFrequency: LoanPaymentFrequency;
+
+  totalInstallments: number;
+
+  paidInstallments: number;
+
+  installmentAmount: number;
+}
+
 export interface CustomerLoan {
   loanId: string;
+
   loanName: string;
+
   maskedLoanNumber: string;
+
   loanType: string;
+
+  financialDetails?: LoanFinancialDetails;
+}
+
+export interface SwiftTransferDetails {
+  /*
+   * Identificador único de seguimiento
+   * de la transferencia.
+   */
+  uetr: string;
+
+  /*
+   * Referencia bancaria de la operación.
+   */
+  transactionReference: string;
+
+  /*
+   * Datos del ordenante.
+   */
+  orderingCustomerName: string;
+
+  orderingAccount:
+    string;
+
+  /*
+   * Datos del beneficiario.
+   */
+  beneficiaryName: string;
+
+  beneficiaryIban: string;
+
+  /*
+   * Banco receptor.
+   */
+  beneficiaryBankName: string;
+
+  beneficiaryBankBic: string;
+
+  beneficiaryBankCountry: string;
+
+  /*
+   * Concepto enviado con la transferencia.
+   */
+  remittanceInformation: string;
+
+  /*
+   * Fecha valor bancaria.
+   */
+  valueDate: string;
+
+  /*
+   * Modalidad de gastos SWIFT.
+   *
+   * SHA = gastos compartidos
+   * OUR = gastos a cargo del ordenante
+   * BEN = gastos a cargo del beneficiario
+   */
+  charges: "SHA" | "OUR" | "BEN";
+
+  /*
+   * Estado operativo de la transferencia.
+   */
+  transferStatus:
+    | "processed"
+    | "settled"
+    | "pending";
 }
 
 export interface BankMovement {
   movementId: string;
+
   accountId: string;
+
   date: string;
+
   description: string;
+
   amount: number;
+
   currency: string;
+
+  /*
+   * Solo existe para movimientos que
+   * representan transferencias
+   * internacionales susceptibles de
+   * generar una confirmación SWIFT.
+   */
+  swiftDetails?: SwiftTransferDetails;
 }
 
 export interface DateRange {
   from: string | null;
+
   to: string | null;
 }
 
@@ -70,12 +181,15 @@ export interface DocumentRequest {
   documentType: DocumentType;
 
   availableAccounts: CustomerAccount[];
+
   selectedAccount: CustomerAccount | null;
 
   availableLoans: CustomerLoan[];
+
   selectedLoan: CustomerLoan | null;
 
   availableMovements: BankMovement[];
+
   selectedMovement: BankMovement | null;
 
   dateRange: DateRange | null;
@@ -85,30 +199,42 @@ export interface DocumentRequest {
   status: RequestStatus;
 }
 
-export const createEmptyDocumentRequest = (): DocumentRequest => ({
-  originalRequest: "",
+export const createEmptyDocumentRequest =
+  (): DocumentRequest => ({
+    originalRequest: "",
 
-  customer: {
-    customerId: null,
-    dni: null,
-    name: null,
-    resolutionStatus: "unresolved",
-  },
+    customer: {
+      customerId: null,
 
-  documentType: "unknown",
+      dni: null,
 
-  availableAccounts: [],
-  selectedAccount: null,
+      name: null,
 
-  availableLoans: [],
-  selectedLoan: null,
+      resolutionStatus:
+        "unresolved",
+    },
 
-  availableMovements: [],
-  selectedMovement: null,
+    documentType: "unknown",
 
-  dateRange: null,
+    availableAccounts: [],
 
-  missingFields: ["dni", "documentType"],
+    selectedAccount: null,
 
-  status: "collecting_information",
-});
+    availableLoans: [],
+
+    selectedLoan: null,
+
+    availableMovements: [],
+
+    selectedMovement: null,
+
+    dateRange: null,
+
+    missingFields: [
+      "dni",
+      "documentType",
+    ],
+
+    status:
+      "collecting_information",
+  });
