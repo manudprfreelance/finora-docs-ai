@@ -59,21 +59,28 @@ const documentTypeLabels: Record<
     "Cuadro de amortización",
   swift_confirmation:
     "Confirmación SWIFT",
-  unknown: "Sin identificar",
+  unknown:
+    "Sin identificar",
 };
 
 const missingFieldLabels: Record<
   string,
   string
 > = {
-  dni: "DNI",
-  customer: "Cliente",
+  dni:
+    "DNI",
+  customer:
+    "Cliente",
   documentType:
     "Tipo de documento",
-  account: "Cuenta",
-  dateRange: "Periodo",
-  loan: "Préstamo",
-  movement: "Operación",
+  account:
+    "Cuenta",
+  dateRange:
+    "Periodo",
+  loan:
+    "Préstamo",
+  movement:
+    "Operación",
 };
 
 function getStatusLabel(
@@ -126,7 +133,10 @@ function getRecoveryMessage(
 }
 
 export default function RequestPage() {
-  const [messages, setMessages] =
+  const [
+    messages,
+    setMessages,
+  ] =
     useState<ChatMessage[]>([
       {
         id: 1,
@@ -136,8 +146,13 @@ export default function RequestPage() {
       },
     ]);
 
-  const [requestId, setRequestId] =
-    useState<string | null>(null);
+  const [
+    requestId,
+    setRequestId,
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     requestState,
@@ -147,19 +162,37 @@ export default function RequestPage() {
       null,
     );
 
-  const [input, setInput] =
+  const [
+    input,
+    setInput,
+  ] =
     useState("");
 
-  const [isLoading, setIsLoading] =
+  const [
+    isLoading,
+    setIsLoading,
+  ] =
     useState(false);
 
   const [
     isRecoveringSession,
     setIsRecoveringSession,
-  ] = useState(true);
+  ] =
+    useState(true);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [
+    isDownloadingDocument,
+    setIsDownloadingDocument,
+  ] =
+    useState(false);
+
+  const [
+    error,
+    setError,
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const isReadyForConfirmation =
     requestState?.status ===
@@ -182,9 +215,26 @@ export default function RequestPage() {
     "failed";
 
   /*
-   * Una vez que la solicitud entra en su
-   * fase de procesamiento ya no seguimos
-   * recopilando información mediante chat.
+   * De momento la descarga real está
+   * implementada para el primer camino:
+   * account_statement.
+   *
+   * Cuando terminemos loan amortization
+   * y SWIFT ampliaremos esta condición.
+   */
+  const canDownloadDocument =
+    Boolean(
+      requestId &&
+        isCompleted &&
+        requestState
+          ?.documentType ===
+          "account_statement",
+    );
+
+  /*
+   * Una vez que la solicitud entra
+   * en procesamiento ya no seguimos
+   * recopilando información por chat.
    */
   const isConversationClosed =
     isConfirmed ||
@@ -193,8 +243,9 @@ export default function RequestPage() {
     isFailed;
 
   /*
-   * La cuenta no forma parte del resumen
-   * operativo de un cuadro de amortización.
+   * La cuenta no forma parte del
+   * resumen operativo de un cuadro
+   * de amortización.
    */
   const shouldShowAccount =
     requestState !== null &&
@@ -204,8 +255,9 @@ export default function RequestPage() {
   /*
    * Mostramos el periodo únicamente:
    *
-   * 1. si el motor lo considera pendiente, o
-   * 2. si realmente existe alguna fecha.
+   * 1. si el motor lo considera
+   *    pendiente, o
+   * 2. si realmente existe una fecha.
    */
   const shouldShowPeriod =
     requestState !== null &&
@@ -214,12 +266,13 @@ export default function RequestPage() {
         "dateRange",
       ) ||
       (
-        requestState.dateRange !== null &&
+        requestState.dateRange !==
+          null &&
         (
-          requestState.dateRange.from !==
-            null ||
-          requestState.dateRange.to !==
-            null
+          requestState.dateRange
+            .from !== null ||
+          requestState.dateRange
+            .to !== null
         )
       )
     );
@@ -231,13 +284,15 @@ export default function RequestPage() {
       (currentMessages) => {
         const lastMessage =
           currentMessages[
-            currentMessages.length - 1
+            currentMessages.length -
+              1
           ];
 
         if (
           lastMessage?.role ===
             "assistant" &&
-          lastMessage.content === content
+          lastMessage.content ===
+            content
         ) {
           return currentMessages;
         }
@@ -246,7 +301,8 @@ export default function RequestPage() {
           ...currentMessages,
           {
             id: Date.now(),
-            role: "assistant",
+            role:
+              "assistant",
             content,
           },
         ];
@@ -280,22 +336,25 @@ export default function RequestPage() {
 
       if (!storedRequestId) {
         if (!cancelled) {
-          setIsRecoveringSession(false);
+          setIsRecoveringSession(
+            false,
+          );
         }
 
         return;
       }
 
       try {
-        const response = await fetch(
-          `/api/agent?requestId=${encodeURIComponent(
-            storedRequestId,
-          )}`,
-          {
-            method: "GET",
-            cache: "no-store",
-          },
-        );
+        const response =
+          await fetch(
+            `/api/agent?requestId=${encodeURIComponent(
+              storedRequestId,
+            )}`,
+            {
+              method: "GET",
+              cache: "no-store",
+            },
+          );
 
         const data =
           (await response.json()) as
@@ -316,8 +375,13 @@ export default function RequestPage() {
             clearStoredRequestId();
 
             if (!cancelled) {
-              setRequestId(null);
-              setRequestState(null);
+              setRequestId(
+                null,
+              );
+
+              setRequestState(
+                null,
+              );
             }
 
             return;
@@ -342,32 +406,43 @@ export default function RequestPage() {
 
         setMessages([
           {
-            id: Date.now(),
-            role: "assistant",
+            id:
+              Date.now(),
+            role:
+              "assistant",
             content:
               "He recuperado tu solicitud anterior.",
           },
           {
-            id: Date.now() + 1,
-            role: "assistant",
+            id:
+              Date.now() + 1,
+            role:
+              "assistant",
             content:
               getRecoveryMessage(
                 data.requestState,
-                data.nextAction.message,
+                data.nextAction
+                  .message,
               ),
           },
         ]);
-      } catch (recoveryError) {
+      } catch (
+        recoveryError
+      ) {
         if (cancelled) {
           return;
         }
 
         const errorMessage =
-          recoveryError instanceof Error
-            ? recoveryError.message
+          recoveryError instanceof
+          Error
+            ? recoveryError
+                .message
             : "No se ha podido recuperar la solicitud anterior.";
 
-        setError(errorMessage);
+        setError(
+          errorMessage,
+        );
       } finally {
         if (!cancelled) {
           setIsRecoveringSession(
@@ -388,7 +463,8 @@ export default function RequestPage() {
     payload:
       | {
           message: string;
-          requestId: string | null;
+          requestId:
+            string | null;
         }
       | {
           action:
@@ -396,21 +472,23 @@ export default function RequestPage() {
           requestId: string;
         },
   ): Promise<AgentApiResponse> {
-    const response = await fetch(
-      "/api/agent",
-      {
-        method: "POST",
+    const response =
+      await fetch(
+        "/api/agent",
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body:
+            JSON.stringify(
+              payload,
+            ),
         },
-
-        body: JSON.stringify(
-          payload,
-        ),
-      },
-    );
+      );
 
     const data =
       (await response.json()) as
@@ -430,8 +508,13 @@ export default function RequestPage() {
       ) {
         clearStoredRequestId();
 
-        setRequestId(null);
-        setRequestState(null);
+        setRequestId(
+          null,
+        );
+
+        setRequestState(
+          null,
+        );
       }
 
       throw new Error(
@@ -443,11 +526,13 @@ export default function RequestPage() {
   }
 
   async function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
+    event:
+      FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
 
-    const message = input.trim();
+    const message =
+      input.trim();
 
     if (
       !message ||
@@ -458,14 +543,17 @@ export default function RequestPage() {
       return;
     }
 
-    const userMessage: ChatMessage = {
+    const userMessage:
+      ChatMessage = {
       id: Date.now(),
       role: "user",
       content: message,
     };
 
     setMessages(
-      (currentMessages) => [
+      (
+        currentMessages,
+      ) => [
         ...currentMessages,
         userMessage,
       ],
@@ -477,10 +565,12 @@ export default function RequestPage() {
 
     try {
       const data =
-        await sendAgentRequest({
-          message,
-          requestId,
-        });
+        await sendAgentRequest(
+          {
+            message,
+            requestId,
+          },
+        );
 
       setRequestId(
         data.requestId,
@@ -497,13 +587,19 @@ export default function RequestPage() {
       appendAssistantMessage(
         data.nextAction.message,
       );
-    } catch (requestError) {
+    } catch (
+      requestError
+    ) {
       const errorMessage =
-        requestError instanceof Error
-          ? requestError.message
+        requestError instanceof
+        Error
+          ? requestError
+              .message
           : "Se ha producido un error inesperado.";
 
-      setError(errorMessage);
+      setError(
+        errorMessage,
+      );
     } finally {
       setIsLoading(false);
     }
@@ -525,11 +621,13 @@ export default function RequestPage() {
 
     try {
       const data =
-        await sendAgentRequest({
-          action:
-            "confirm_request",
-          requestId,
-        });
+        await sendAgentRequest(
+          {
+            action:
+              "confirm_request",
+            requestId,
+          },
+        );
 
       setRequestState(
         data.requestState,
@@ -538,29 +636,159 @@ export default function RequestPage() {
       appendAssistantMessage(
         data.nextAction.message,
       );
-    } catch (requestError) {
+    } catch (
+      requestError
+    ) {
       const errorMessage =
-        requestError instanceof Error
-          ? requestError.message
+        requestError instanceof
+        Error
+          ? requestError
+              .message
           : "Se ha producido un error inesperado.";
 
-      setError(errorMessage);
+      setError(
+        errorMessage,
+      );
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleDownloadDocument() {
+    if (
+      !requestId ||
+      !canDownloadDocument ||
+      isDownloadingDocument
+    ) {
+      return;
+    }
+
+    setError(null);
+
+    setIsDownloadingDocument(
+      true,
+    );
+
+    try {
+      const response =
+        await fetch(
+          `/api/documents/${encodeURIComponent(
+            requestId,
+          )}/download`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+      if (!response.ok) {
+        let errorMessage =
+          "No se ha podido descargar el documento.";
+
+        try {
+          const apiError =
+            (await response.json()) as
+              AgentApiError;
+
+          if (
+            apiError.error
+          ) {
+            errorMessage =
+              apiError.error;
+          }
+        } catch {
+          /*
+           * Si la respuesta de error no
+           * es JSON conservamos el
+           * mensaje genérico.
+           */
+        }
+
+        throw new Error(
+          errorMessage,
+        );
+      }
+
+      const blob =
+        await response.blob();
+
+      const contentDisposition =
+        response.headers.get(
+          "Content-Disposition",
+        );
+
+      const fileNameMatch =
+        contentDisposition?.match(
+          /filename="([^"]+)"/,
+        );
+
+      const fileName =
+        fileNameMatch?.[1] ??
+        `account-statement-${requestId}.pdf`;
+
+      const downloadUrl =
+        window.URL.createObjectURL(
+          blob,
+        );
+
+      const anchor =
+        document.createElement(
+          "a",
+        );
+
+      anchor.href =
+        downloadUrl;
+
+      anchor.download =
+        fileName;
+
+      document.body.appendChild(
+        anchor,
+      );
+
+      anchor.click();
+
+      anchor.remove();
+
+      window.URL.revokeObjectURL(
+        downloadUrl,
+      );
+    } catch (
+      downloadError
+    ) {
+      const errorMessage =
+        downloadError instanceof
+        Error
+          ? downloadError
+              .message
+          : "No se ha podido descargar el documento.";
+
+      setError(
+        errorMessage,
+      );
+    } finally {
+      setIsDownloadingDocument(
+        false,
+      );
     }
   }
 
   function resetConversation() {
     clearStoredRequestId();
 
-    setRequestId(null);
+    setRequestId(
+      null,
+    );
 
-    setRequestState(null);
+    setRequestState(
+      null,
+    );
 
     setMessages([
       {
         id: Date.now(),
-        role: "assistant",
+        role:
+          "assistant",
         content:
           INITIAL_ASSISTANT_MESSAGE,
       },
@@ -609,7 +837,9 @@ export default function RequestPage() {
             {messages.map(
               (message) => (
                 <div
-                  key={message.id}
+                  key={
+                    message.id
+                  }
                   className={`flex ${
                     message.role ===
                     "user"
@@ -668,7 +898,9 @@ export default function RequestPage() {
                   onClick={
                     handleConfirmRequest
                   }
-                  disabled={isLoading}
+                  disabled={
+                    isLoading
+                  }
                   className="mt-4 rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Confirmar solicitud
@@ -709,6 +941,23 @@ export default function RequestPage() {
                 <p className="mt-1 text-sm text-slate-400">
                   El procesamiento ha finalizado correctamente y el documento está preparado.
                 </p>
+
+                {canDownloadDocument && (
+                  <button
+                    type="button"
+                    onClick={
+                      handleDownloadDocument
+                    }
+                    disabled={
+                      isDownloadingDocument
+                    }
+                    className="mt-4 inline-flex items-center justify-center rounded-xl bg-emerald-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isDownloadingDocument
+                      ? "Preparando descarga..."
+                      : "Descargar PDF"}
+                  </button>
+                )}
               </div>
             )}
 
@@ -732,10 +981,15 @@ export default function RequestPage() {
                 className="flex gap-3"
               >
                 <input
-                  value={input}
-                  onChange={(event) =>
+                  value={
+                    input
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     setInput(
-                      event.target.value,
+                      event.target
+                        .value,
                     )
                   }
                   disabled={
@@ -790,7 +1044,8 @@ export default function RequestPage() {
                 <p className="mt-1 font-medium">
                   {
                     documentTypeLabels[
-                      requestState.documentType
+                      requestState
+                        .documentType
                     ]
                   }
                 </p>
@@ -802,19 +1057,23 @@ export default function RequestPage() {
                 </p>
 
                 <p className="mt-1 font-medium">
-                  {requestState.customer.name ??
-                    (requestState.customer
+                  {requestState.customer
+                    .name ??
+                    (requestState
+                      .customer
                       .resolutionStatus ===
                     "not_found"
                       ? "Cliente no encontrado"
                       : "Pendiente de identificar")}
                 </p>
 
-                {requestState.customer.dni && (
+                {requestState
+                  .customer.dni && (
                   <p className="mt-1 text-sm text-slate-400">
                     DNI{" "}
                     {
-                      requestState.customer
+                      requestState
+                        .customer
                         .dni
                     }
                   </p>
@@ -828,14 +1087,16 @@ export default function RequestPage() {
                   </p>
 
                   <p className="mt-1 font-medium">
-                    {requestState.selectedAccount
+                    {requestState
+                      .selectedAccount
                       ? `${requestState.selectedAccount.accountName} ${requestState.selectedAccount.maskedAccountNumber}`
                       : "Pendiente"}
                   </p>
                 </div>
               )}
 
-              {requestState.documentType ===
+              {requestState
+                .documentType ===
                 "loan_amortization" && (
                 <div>
                   <p className="text-xs text-slate-500">
@@ -843,14 +1104,16 @@ export default function RequestPage() {
                   </p>
 
                   <p className="mt-1 font-medium">
-                    {requestState.selectedLoan
+                    {requestState
+                      .selectedLoan
                       ? `${requestState.selectedLoan.loanName} ${requestState.selectedLoan.maskedLoanNumber}`
                       : "Pendiente"}
                   </p>
                 </div>
               )}
 
-              {requestState.documentType ===
+              {requestState
+                .documentType ===
                 "swift_confirmation" && (
                 <div>
                   <p className="text-xs text-slate-500">
@@ -858,7 +1121,8 @@ export default function RequestPage() {
                   </p>
 
                   <p className="mt-1 font-medium">
-                    {requestState.selectedMovement
+                    {requestState
+                      .selectedMovement
                       ? `${requestState.selectedMovement.date} · ${requestState.selectedMovement.amount} ${requestState.selectedMovement.currency}`
                       : "Pendiente"}
                   </p>
@@ -872,8 +1136,12 @@ export default function RequestPage() {
                   </p>
 
                   <p className="mt-1 font-medium">
-                    {requestState.dateRange?.from &&
-                    requestState.dateRange?.to
+                    {requestState
+                      .dateRange
+                      ?.from &&
+                    requestState
+                      .dateRange
+                      ?.to
                       ? `${requestState.dateRange.from} → ${requestState.dateRange.to}`
                       : "Pendiente"}
                   </p>
@@ -887,24 +1155,29 @@ export default function RequestPage() {
 
                 <p
                   className={`mt-1 font-medium ${
-                    requestState.status ===
+                    requestState
+                      .status ===
                     "failed"
                       ? "text-red-300"
-                      : requestState.status ===
+                      : requestState
+                            .status ===
                           "processing"
                         ? "text-sky-300"
                         : "text-emerald-400"
                   }`}
                 >
                   {getStatusLabel(
-                    requestState.status,
+                    requestState
+                      .status,
                   )}
                 </p>
               </div>
 
-              {requestState.missingFields
+              {requestState
+                .missingFields
                 .length > 0 &&
-                requestState.status ===
+                requestState
+                  .status ===
                   "collecting_information" && (
                   <div>
                     <p className="text-xs text-slate-500">
@@ -912,18 +1185,25 @@ export default function RequestPage() {
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {requestState.missingFields.map(
-                        (field) => (
-                          <span
-                            key={field}
-                            className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
-                          >
-                            {missingFieldLabels[
-                              field
-                            ] ?? field}
-                          </span>
-                        ),
-                      )}
+                      {requestState
+                        .missingFields
+                        .map(
+                          (
+                            field,
+                          ) => (
+                            <span
+                              key={
+                                field
+                              }
+                              className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-300"
+                            >
+                              {missingFieldLabels[
+                                field
+                              ] ??
+                                field}
+                            </span>
+                          ),
+                        )}
                     </div>
                   </div>
                 )}
@@ -935,7 +1215,9 @@ export default function RequestPage() {
                   </p>
 
                   <p className="mt-1 truncate font-mono text-[11px] text-slate-700">
-                    {requestId}
+                    {
+                      requestId
+                    }
                   </p>
                 </div>
               )}

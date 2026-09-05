@@ -8,7 +8,8 @@ export type NextActionType =
   | "ask_date_range"
   | "ask_loan"
   | "ask_movement"
-  | "confirm_request";
+  | "confirm_request"
+  | "request_confirmed";
 
 export interface NextAction {
   type: NextActionType;
@@ -18,6 +19,14 @@ export interface NextAction {
 export function getNextAction(
   request: DocumentRequest,
 ): NextAction {
+  if (request.status === "confirmed") {
+    return {
+      type: "request_confirmed",
+      message:
+        "Solicitud confirmada correctamente. Ya está preparada para su procesamiento.",
+    };
+  }
+
   if (request.missingFields.includes("dni")) {
     return {
       type: "ask_dni",
