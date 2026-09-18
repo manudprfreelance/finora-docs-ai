@@ -1,8 +1,11 @@
-import OpenAI from "openai";
 import {
   NextRequest,
   NextResponse,
 } from "next/server";
+
+import {
+  AIInvalidResponseError,
+} from "@/lib/errors";
 
 import {
   DocumentRequest,
@@ -34,6 +37,27 @@ import {
   processConfirmedRequest,
 } from "@/lib/server/request-processing-dispatcher";
 
+import {
+  OpenAIProvider,
+} from "@/lib/server/ai/openai-provider";
+
+import {
+  GeminiProvider,
+} from "@/lib/server/ai/gemini-provider";
+
+import {
+  injectAIFaultIfConfigured,
+} from "@/lib/server/ai/ai-fault-injection";
+
+import {
+  executeWithAIFallback,
+} from "@/lib/server/ai/ai-fallback";
+
+import {
+  buildAIDegradedModeInfo,
+  shouldActivateAIDegradedMode,
+} from "@/lib/server/ai/ai-degraded-mode";
+
 interface AgentRequestBody {
   message?: string;
   requestId?: string | null;
@@ -53,10 +77,6 @@ interface AgentExtraction {
   confirmRequest: boolean;
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 function parseExtraction(
   output: string,
 ): AgentExtraction {
@@ -65,9 +85,61 @@ function parseExtraction(
     .replace(/```/g, "")
     .trim();
 
-  const parsed = JSON.parse(
-    cleanedOutput,
-  ) as Partial<AgentExtraction>;
+  if (!cleanedOutput) {
+    throw new AIInvalidResponseError(
+      "OpenAI ha devuelto una respuesta vacÃƒÆ’Ã‚Â­a.",
+      {
+        details: {
+          provider: "openai",
+          reason: "empty_response",
+        },
+      },
+    );
+  }
+
+  let parsed: Partial<AgentExtraction>;
+
+  try {
+    const parsedValue: unknown =
+      JSON.parse(cleanedOutput);
+
+    if (
+      typeof parsedValue !== "object" ||
+      parsedValue === null ||
+      Array.isArray(parsedValue)
+    ) {
+      throw new AIInvalidResponseError(
+        "OpenAI ha devuelto una estructura JSON no vÃƒÆ’Ã‚Â¡lida.",
+        {
+          details: {
+            provider: "openai",
+            reason: "invalid_json_structure",
+          },
+        },
+      );
+    }
+
+    parsed =
+      parsedValue as Partial<AgentExtraction>;
+  } catch (error) {
+    if (
+      error instanceof
+      AIInvalidResponseError
+    ) {
+      throw error;
+    }
+
+    throw new AIInvalidResponseError(
+      "OpenAI ha devuelto una respuesta que no contiene JSON vÃƒÆ’Ã‚Â¡lido.",
+      {
+        cause: error,
+        details: {
+          provider: "openai",
+          reason: "invalid_json",
+        },
+      },
+    );
+  }
 
   const allowedDocumentTypes: DocumentType[] = [
     "account_statement",
@@ -153,9 +225,9 @@ function normalizeExtractionForContext(
   };
 
   /*
-   * Si Finora está esperando un préstamo
-   * para un cuadro de amortización y el
-   * modelo interpreta los cuatro dígitos
+   * Si Finora estÃƒÆ’Ã‚Â¡ esperando un prÃƒÆ’Ã‚Â©stamo
+   * para un cuadro de amortizaciÃƒÆ’Ã‚Â³n y el
+   * modelo interpreta los cuatro dÃƒÆ’Ã‚Â­gitos
    * como una cuenta, usamos el contexto
    * determinista para corregirlo.
    */
@@ -428,7 +500,7 @@ function buildContextualNextAction(
     return {
       type: "customer_not_found",
       message:
-        "Esta solicitud ya está asociada a otro cliente. Para trabajar con un cliente diferente, inicia una nueva solicitud.",
+        "Esta solicitud ya estÃƒÆ’Ã‚Â¡ asociada a otro cliente. Para trabajar con un cliente diferente, inicia una nueva solicitud.",
     };
   }
 
@@ -456,7 +528,7 @@ function buildContextualNextAction(
       return {
         type: "ask_document_type",
         message:
-          "No he podido identificar qué documento bancario necesitas. Puedes pedirme, por ejemplo, un extracto de cuenta, un cuadro de amortización o una confirmación SWIFT.",
+          "No he podido identificar quÃƒÆ’Ã‚Â© documento bancario necesitas. Puedes pedirme, por ejemplo, un extracto de cuenta, un cuadro de amortizaciÃƒÆ’Ã‚Â³n o una confirmaciÃƒÆ’Ã‚Â³n SWIFT.",
       };
     }
 
@@ -466,7 +538,7 @@ function buildContextualNextAction(
       return {
         type: "ask_account",
         message:
-          "No he podido identificar la cuenta en tu mensaje. Indícame los últimos cuatro dígitos de una de las cuentas asociadas a tu perfil.",
+          "No he podido identificar la cuenta en tu mensaje. IndÃƒÆ’Ã‚Â­came los ÃƒÆ’Ã‚Âºltimos cuatro dÃƒÆ’Ã‚Â­gitos de una de las cuentas asociadas a tu perfil.",
       };
     }
 
@@ -476,7 +548,7 @@ function buildContextualNextAction(
       return {
         type: "ask_loan",
         message:
-          "No he podido identificar el préstamo. Indícame los últimos cuatro dígitos del préstamo para el que necesitas el cuadro de amortización.",
+          "No he podido identificar el prÃƒÆ’Ã‚Â©stamo. IndÃƒÆ’Ã‚Â­came los ÃƒÆ’Ã‚Âºltimos cuatro dÃƒÆ’Ã‚Â­gitos del prÃƒÆ’Ã‚Â©stamo para el que necesitas el cuadro de amortizaciÃƒÆ’Ã‚Â³n.",
       };
     }
 
@@ -487,7 +559,7 @@ function buildContextualNextAction(
       return {
         type: "ask_date_range",
         message:
-          "No he podido identificar el periodo. Indícame una fecha inicial y una fecha final, por ejemplo: del 1 al 31 de julio de 2026.",
+          "No he podido identificar el periodo. IndÃƒÆ’Ã‚Â­came una fecha inicial y una fecha final, por ejemplo: del 1 al 31 de julio de 2026.",
       };
     }
 
@@ -498,7 +570,7 @@ function buildContextualNextAction(
       return {
         type: "ask_movement",
         message:
-          "No he podido identificar la operación. Puedes indicarme la fecha, el importe o el beneficiario de la transferencia.",
+          "No he podido identificar la operaciÃƒÆ’Ã‚Â³n. Puedes indicarme la fecha, el importe o el beneficiario de la transferencia.",
       };
     }
   }
@@ -511,7 +583,7 @@ function buildContextualNextAction(
   ) {
     return {
       type: "ask_account",
-      message: `No he encontrado ninguna cuenta de tu perfil terminada en ${extraction.accountLast4}. Indícame una de las cuentas asociadas a tu perfil.`,
+      message: `No he encontrado ninguna cuenta de tu perfil terminada en ${extraction.accountLast4}. IndÃƒÆ’Ã‚Â­came una de las cuentas asociadas a tu perfil.`,
     };
   }
 
@@ -523,7 +595,7 @@ function buildContextualNextAction(
   ) {
     return {
       type: "ask_loan",
-      message: `No he encontrado ningún préstamo de tu perfil terminado en ${extraction.loanLast4}. Indícame uno de los préstamos asociados a tu perfil.`,
+      message: `No he encontrado ningÃƒÆ’Ã‚Âºn prÃƒÆ’Ã‚Â©stamo de tu perfil terminado en ${extraction.loanLast4}. IndÃƒÆ’Ã‚Â­came uno de los prÃƒÆ’Ã‚Â©stamos asociados a tu perfil.`,
     };
   }
 
@@ -698,7 +770,7 @@ async function processJustConfirmedRequest(
         type:
           "request_processing_completed",
         message:
-          "Solicitud procesada correctamente. El documento ya está preparado.",
+          "Solicitud procesada correctamente. El documento ya estÃƒÆ’Ã‚Â¡ preparado.",
       },
     };
   }
@@ -748,7 +820,7 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            "No se ha encontrado la sesión de la solicitud.",
+            "No se ha encontrado la sesiÃƒÆ’Ã‚Â³n de la solicitud.",
           code:
             "SESSION_NOT_FOUND",
         },
@@ -810,8 +882,8 @@ export async function POST(
       (await request.json()) as AgentRequestBody;
 
     /*
-     * Confirmación explícita desde
-     * el botón de la interfaz.
+     * ConfirmaciÃƒÆ’Ã‚Â³n explÃƒÆ’Ã‚Â­cita desde
+     * el botÃƒÆ’Ã‚Â³n de la interfaz.
      */
     if (
       body.action ===
@@ -821,7 +893,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "No se ha encontrado la sesión de la solicitud.",
+              "No se ha encontrado la sesiÃƒÆ’Ã‚Â³n de la solicitud.",
             code:
               "SESSION_REQUIRED",
           },
@@ -840,7 +912,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
+              "La sesiÃƒÆ’Ã‚Â³n de la solicitud ha caducado. Inicia una nueva solicitud.",
             code:
               "SESSION_NOT_FOUND",
           },
@@ -998,7 +1070,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
+              "La sesiÃƒÆ’Ã‚Â³n de la solicitud ha caducado. Inicia una nueva solicitud.",
             code:
               "SESSION_NOT_FOUND",
           },
@@ -1027,7 +1099,7 @@ export async function POST(
     /*
      * Registramos la existencia del mensaje,
      * pero no duplicamos el texto completo
-     * dentro de la auditoría.
+     * dentro de la auditorÃƒÆ’Ã‚Â­a.
      */
     await createRequestEvent(
       storedRequest.requestId,
@@ -1051,11 +1123,19 @@ export async function POST(
         currentRequest,
       );
 
-    const response =
-      await openai.responses.create({
-        model: "gpt-5.6-luna",
+    const openAIProvider =
+      new OpenAIProvider(
+        process.env.OPENAI_API_KEY,
+      );
 
-        instructions: `
+    const geminiProvider =
+      process.env.GEMINI_API_KEY
+        ? new GeminiProvider(
+            process.env.GEMINI_API_KEY,
+          )
+        : undefined;
+
+    const aiInstructions = `
 You are the natural-language understanding layer of Finora Docs AI,
 a Spanish banking document request assistant.
 
@@ -1090,7 +1170,7 @@ Supported document types:
   positions or financial position.
 
 - loan_amortization:
-  loan or mortgage amortization schedule, cuadro de amortización.
+  loan or mortgage amortization schedule, cuadro de amortizaciÃƒÆ’Ã‚Â³n.
 
 - swift_confirmation:
   SWIFT confirmation, justificante SWIFT or proof of an international
@@ -1121,13 +1201,13 @@ For transfer movements:
 
 Set confirmRequest to true only when the customer is clearly confirming
 the current request, for example:
-- "sí, confirma"
+- "sÃƒÆ’Ã‚Â­, confirma"
 - "confirmo"
 - "adelante"
-- "está correcto"
+- "estÃƒÆ’Ã‚Â¡ correcto"
 - "puedes tramitarlo"
 
-Do not interpret a generic "sí" as confirmation unless it clearly refers
+Do not interpret a generic "sÃƒÆ’Ã‚Â­" as confirmation unless it clearly refers
 to confirming the request.
 
 Messages unrelated to banking document requests, insults, greetings or
@@ -1154,14 +1234,148 @@ Return exactly this JSON shape:
   "movementBeneficiary": string | null,
   "confirmRequest": boolean
 }
-        `.trim(),
+    `.trim();
 
-        input: message,
-      });
+    let aiResult;
+
+    try {
+      aiResult =
+        await executeWithAIFallback(
+          {
+            instructions:
+              aiInstructions,
+            input: message,
+          },
+          {
+            primaryProvider:
+              openAIProvider,
+            fallbackProvider:
+              geminiProvider,
+
+            beforeAttempt: (
+              provider,
+              attempt,
+            ) => {
+              injectAIFaultIfConfigured(
+                attempt,
+                provider.name,
+              );
+            },
+          },
+        );
+    } catch (error) {
+      if (
+        shouldActivateAIDegradedMode(
+          error,
+        )
+      ) {
+        const degradedMode =
+          buildAIDegradedModeInfo(
+            error,
+          );
+
+        await createRequestEvent(
+          storedRequest.requestId,
+          "ai_degraded_mode_activated",
+          {
+            code:
+              degradedMode.code,
+            reason:
+              degradedMode.reason,
+            originalErrorCode:
+              degradedMode.originalErrorCode,
+            primaryProvider:
+              openAIProvider.name,
+            fallbackProvider:
+              geminiProvider?.name ?? null,
+          },
+        );
+
+        console.warn(
+          `[Finora AI] Todos los proveedores disponibles han fallado. ` +
+            `Activando modo degradado para la solicitud ${storedRequest.requestId}. ` +
+            `Código: ${degradedMode.originalErrorCode}.`,
+        );
+
+        return NextResponse.json({
+          requestId:
+            storedRequest.requestId,
+
+          receivedMessage:
+            message,
+
+          agent: {
+            mode: "degraded",
+            provider:
+              "finora-engine",
+            model: null,
+          },
+
+          degradedMode,
+
+          extraction: null,
+
+          requestState:
+            currentRequest,
+
+          nextAction: {
+            type:
+              "ai_degraded_mode",
+            message:
+              "Los servicios de interpretación automática no están disponibles temporalmente. Puedes continuar la solicitud mediante el modo de contingencia.",
+          },
+        });
+      }
+
+      throw error;
+    }
+
+    const {
+      response,
+      fallback,
+    } = aiResult;
+
+    await createRequestEvent(
+      storedRequest.requestId,
+      "ai_generation_completed",
+      {
+        provider:
+          response.provider,
+        model:
+          response.model,
+        inputTokens:
+          response.usage.inputTokens,
+        outputTokens:
+          response.usage.outputTokens,
+        totalTokens:
+          response.usage.totalTokens,
+        fallbackUsed:
+          fallback.used,
+      },
+    );
+
+    if (fallback.used) {
+      await createRequestEvent(
+        storedRequest.requestId,
+        "ai_fallback_activated",
+        {
+          fromProvider:
+            fallback.fromProvider,
+          toProvider:
+            fallback.toProvider,
+          reason:
+            fallback.reason,
+        },
+      );
+    }
+
+    console.info(
+      `[Finora AI] Respuesta recibida de ${response.provider}/${response.model}. Tokens: input=${response.usage.inputTokens ?? "n/a"}, output=${response.usage.outputTokens ?? "n/a"}, total=${response.usage.totalTokens ?? "n/a"}.`,
+    );
 
     const rawExtraction =
       parseExtraction(
-        response.output_text,
+        response.outputText,
       );
 
     const extraction =
@@ -1246,8 +1460,8 @@ Return exactly this JSON shape:
       );
 
       /*
-       * También procesamos cuando la
-       * confirmación llega mediante
+       * TambiÃƒÆ’Ã‚Â©n procesamos cuando la
+       * confirmaciÃƒÆ’Ã‚Â³n llega mediante
        * lenguaje natural.
        */
       const processed =
@@ -1263,10 +1477,13 @@ Return exactly this JSON shape:
           message,
 
         agent: {
-          mode: "openai",
-          provider: "openai",
+          mode: "ai",
+          provider:
+            response.provider,
           model:
-            "gpt-5.6-luna",
+            response.model,
+          usage:
+            response.usage,
         },
 
         extraction,
@@ -1287,10 +1504,13 @@ Return exactly this JSON shape:
         message,
 
       agent: {
-        mode: "openai",
-        provider: "openai",
+        mode: "ai",
+        provider:
+          response.provider,
         model:
-          "gpt-5.6-luna",
+          response.model,
+        usage:
+          response.usage,
       },
 
       extraction,
