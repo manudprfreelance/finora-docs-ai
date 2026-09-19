@@ -21,6 +21,16 @@ export interface RequestRepository {
     requestState: DocumentRequest,
   ): Promise<StoredRequest>;
 
+  claimForConfirmation(
+    requestId: string,
+    confirmedState: DocumentRequest,
+  ): Promise<StoredRequest | null>;
+
+  claimForProcessing(
+    requestId: string,
+    processingState: DocumentRequest,
+  ): Promise<StoredRequest | null>;
+
   delete(
     requestId: string,
   ): Promise<boolean>;

@@ -11,6 +11,7 @@ import {
 } from "@/lib/server/request-event-repository";
 
 import {
+  claimRequestForProcessing,
   getRequestSession,
   saveRequestSession,
 } from "@/lib/server/request-store";
@@ -22,6 +23,7 @@ export interface RequestProcessingDispatchResult {
   externalReference: string | null;
   output: Record<string, unknown>;
   error: string | null;
+  duplicatePrevented: boolean;
 }
 
 export async function processConfirmedRequest(
@@ -40,6 +42,40 @@ export async function processConfirmedRequest(
     storedRequest.requestState.status !==
     "confirmed"
   ) {
+    if (
+      storedRequest.requestState.status ===
+        "processing" ||
+      storedRequest.requestState.status ===
+        "completed"
+    ) {
+      await createRequestEvent(
+        requestId,
+        "request_processing_duplicate_prevented",
+        {
+          documentType:
+            storedRequest.requestState.documentType,
+          customerId:
+            storedRequest.requestState.customer
+              .customerId,
+          status:
+            storedRequest.requestState.status,
+          reason:
+            "request_already_claimed_or_completed",
+        },
+      );
+
+      return {
+        requestId,
+        requestState:
+          storedRequest.requestState,
+        provider: null,
+        externalReference: null,
+        output: {},
+        error: null,
+        duplicatePrevented: true,
+      };
+    }
+
     throw new Error(
       "Only confirmed requests can be dispatched for processing.",
     );
@@ -50,10 +86,55 @@ export async function processConfirmedRequest(
     status: "processing",
   };
 
-  await saveRequestSession(
-    requestId,
-    processingRequest,
-  );
+  /*
+   * Claim atómico en PostgreSQL.
+   *
+   * Solo una ejecución puede cambiar
+   * confirmed -> processing.
+   */
+  const claimedRequest =
+    await claimRequestForProcessing(
+      requestId,
+      processingRequest,
+    );
+
+  if (!claimedRequest) {
+    const latestRequest =
+      await getRequestSession(requestId);
+
+    if (!latestRequest) {
+      throw new Error(
+        `Request session ${requestId} was not found after processing claim.`,
+      );
+    }
+
+    await createRequestEvent(
+      requestId,
+      "request_processing_duplicate_prevented",
+      {
+        documentType:
+          latestRequest.requestState.documentType,
+        customerId:
+          latestRequest.requestState.customer
+            .customerId,
+        status:
+          latestRequest.requestState.status,
+        reason:
+          "atomic_processing_claim_not_acquired",
+      },
+    );
+
+    return {
+      requestId,
+      requestState:
+        latestRequest.requestState,
+      provider: null,
+      externalReference: null,
+      output: {},
+      error: null,
+      duplicatePrevented: true,
+    };
+  }
 
   await createRequestEvent(
     requestId,
@@ -129,6 +210,7 @@ export async function processConfirmedRequest(
           processingResult.output,
         error:
           processingResult.error,
+        duplicatePrevented: false,
       };
     }
 
@@ -174,6 +256,7 @@ export async function processConfirmedRequest(
       output:
         processingResult.output,
       error: null,
+      duplicatePrevented: false,
     };
   } catch (error) {
     const errorMessage =
@@ -222,6 +305,7 @@ export async function processConfirmedRequest(
       output: {},
       error:
         errorMessage,
+      duplicatePrevented: false,
     };
   }
 }

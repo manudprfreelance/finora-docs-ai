@@ -69,6 +69,70 @@ export class MemoryRequestRepository
     return storedRequest;
   }
 
+  async claimForConfirmation(
+    requestId: string,
+    confirmedState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const existingRequest =
+      this.requests.get(requestId);
+
+    if (
+      !existingRequest ||
+      existingRequest.requestState.status !==
+        "ready_for_confirmation"
+    ) {
+      return null;
+    }
+
+    const storedRequest: StoredRequest = {
+      requestId,
+      requestState: confirmedState,
+      createdAt:
+        existingRequest.createdAt,
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    this.requests.set(
+      requestId,
+      storedRequest,
+    );
+
+    return storedRequest;
+  }
+
+  async claimForProcessing(
+    requestId: string,
+    processingState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const existingRequest =
+      this.requests.get(requestId);
+
+    if (
+      !existingRequest ||
+      existingRequest.requestState.status !==
+        "confirmed"
+    ) {
+      return null;
+    }
+
+    const storedRequest: StoredRequest = {
+      requestId,
+      requestState: processingState,
+      createdAt:
+        existingRequest.createdAt,
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    this.requests.set(
+      requestId,
+      storedRequest,
+    );
+
+    return storedRequest;
+  }
+
   async delete(
     requestId: string,
   ): Promise<boolean> {

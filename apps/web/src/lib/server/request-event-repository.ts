@@ -11,6 +11,7 @@ export type RequestEventType =
   | "request_processing_started"
   | "request_processing_completed"
   | "request_processing_failed"
+  | "request_processing_duplicate_prevented"
   | "customer_change_rejected"
   | "ai_generation_completed"
   | "ai_fallback_activated"

@@ -31,6 +31,26 @@ export async function saveRequestSession(
   );
 }
 
+export async function claimRequestForConfirmation(
+  requestId: string,
+  confirmedState: DocumentRequest,
+) {
+  return requestRepository.claimForConfirmation(
+    requestId,
+    confirmedState,
+  );
+}
+
+export async function claimRequestForProcessing(
+  requestId: string,
+  processingState: DocumentRequest,
+) {
+  return requestRepository.claimForProcessing(
+    requestId,
+    processingState,
+  );
+}
+
 export async function deleteRequestSession(
   requestId: string,
 ) {

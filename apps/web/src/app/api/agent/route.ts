@@ -24,6 +24,7 @@ import {
 } from "@/lib/request-next-action";
 
 import {
+  claimRequestForConfirmation,
   createRequestSession,
   getRequestSession,
   saveRequestSession,
@@ -778,7 +779,27 @@ async function processJustConfirmedRequest(
         type:
           "request_processing_completed",
         message:
-          "Solicitud procesada correctamente. El documento ya está preparado.",
+          processingResult.duplicatePrevented
+            ? "La solicitud ya había sido procesada. El documento está preparado."
+            : "Solicitud procesada correctamente. El documento ya está preparado.",
+      },
+    };
+  }
+
+  if (
+    processingResult.duplicatePrevented &&
+    processingResult.requestState.status ===
+      "processing"
+  ) {
+    return {
+      requestState:
+        processingResult.requestState,
+
+      nextAction: {
+        type:
+          "request_processing_in_progress",
+        message:
+          "La solicitud ya está siendo procesada. No se ha iniciado un procesamiento duplicado.",
       },
     };
   }
@@ -938,46 +959,47 @@ export async function POST(
           currentRequest,
         );
 
-      await saveRequestSession(
-        storedRequest.requestId,
-        documentRequest,
-      );
-
-      await recordRequestUpdateEvents(
-        storedRequest.requestId,
-        currentRequest,
-        documentRequest,
-      );
-
       const wasJustConfirmed =
-        currentRequest.status !==
-          "confirmed" &&
+        currentRequest.status ===
+          "ready_for_confirmation" &&
         documentRequest.status ===
           "confirmed";
 
       if (wasJustConfirmed) {
-        await createRequestEvent(
-          storedRequest.requestId,
-          "request_confirmed",
-          {
-            documentType:
-              documentRequest.documentType,
+        const confirmationClaim =
+          await claimRequestForConfirmation(
+            storedRequest.requestId,
+            documentRequest,
+          );
 
-            customerId:
-              documentRequest.customer
-                .customerId,
-          },
-        );
+        if (confirmationClaim) {
+          await recordRequestUpdateEvents(
+            storedRequest.requestId,
+            currentRequest,
+            confirmationClaim.requestState,
+          );
+
+          await createRequestEvent(
+            storedRequest.requestId,
+            "request_confirmed",
+            {
+              documentType:
+                confirmationClaim.requestState
+                  .documentType,
+
+              customerId:
+                confirmationClaim.requestState
+                  .customer.customerId,
+            },
+          );
+        }
 
         /*
-         * Una solicitud confirmada pasa
-         * inmediatamente al dispatcher.
-         *
-         * Con el simulador local:
-         *
-         * confirmed
-         * -> processing
-         * -> completed
+         * Tanto el ganador del claim de confirmación
+         * como una petición concurrente continúan
+         * hacia el dispatcher. Allí un segundo claim
+         * atómico garantiza que solo una ejecución
+         * pueda pasar de confirmed a processing.
          */
         const processed =
           await processJustConfirmedRequest(
@@ -1007,6 +1029,17 @@ export async function POST(
             processed.nextAction,
         });
       }
+
+      await saveRequestSession(
+        storedRequest.requestId,
+        documentRequest,
+      );
+
+      await recordRequestUpdateEvents(
+        storedRequest.requestId,
+        currentRequest,
+        documentRequest,
+      );
 
       const nextAction =
         getNextAction(
@@ -1555,41 +1588,47 @@ Return exactly this JSON shape:
         extraction,
       );
 
-    await saveRequestSession(
-      storedRequest.requestId,
-      documentRequest,
-    );
-
-    await recordRequestUpdateEvents(
-      storedRequest.requestId,
-      currentRequest,
-      documentRequest,
-    );
-
     const wasJustConfirmed =
-      currentRequest.status !==
-        "confirmed" &&
+      currentRequest.status ===
+        "ready_for_confirmation" &&
       documentRequest.status ===
         "confirmed";
 
     if (wasJustConfirmed) {
-      await createRequestEvent(
-        storedRequest.requestId,
-        "request_confirmed",
-        {
-          documentType:
-            documentRequest.documentType,
+      const confirmationClaim =
+        await claimRequestForConfirmation(
+          storedRequest.requestId,
+          documentRequest,
+        );
 
-          customerId:
-            documentRequest.customer
-              .customerId,
-        },
-      );
+      if (confirmationClaim) {
+        await recordRequestUpdateEvents(
+          storedRequest.requestId,
+          currentRequest,
+          confirmationClaim.requestState,
+        );
+
+        await createRequestEvent(
+          storedRequest.requestId,
+          "request_confirmed",
+          {
+            documentType:
+              confirmationClaim.requestState
+                .documentType,
+
+            customerId:
+              confirmationClaim.requestState
+                .customer.customerId,
+          },
+        );
+      }
 
       /*
        * También procesamos cuando la
        * confirmación llega mediante
-       * lenguaje natural.
+       * lenguaje natural. El claim
+       * PostgreSQL evita que una segunda
+       * petición reabra el estado confirmed.
        */
       const processed =
         await processJustConfirmedRequest(
@@ -1622,6 +1661,17 @@ Return exactly this JSON shape:
           processed.nextAction,
       });
     }
+
+    await saveRequestSession(
+      storedRequest.requestId,
+      documentRequest,
+    );
+
+    await recordRequestUpdateEvents(
+      storedRequest.requestId,
+      currentRequest,
+      documentRequest,
+    );
 
     return NextResponse.json({
       requestId:

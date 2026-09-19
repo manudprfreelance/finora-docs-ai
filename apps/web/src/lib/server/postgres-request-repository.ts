@@ -132,6 +132,78 @@ export class PostgresRequestRepository
     return mapRowToStoredRequest(row);
   }
 
+  async claimForConfirmation(
+    requestId: string,
+    confirmedState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const result =
+      await postgresPool.query<RequestSessionRow>(
+        `
+          UPDATE request_sessions
+          SET
+            request_state = $2::jsonb,
+            status = 'confirmed',
+            updated_at = NOW()
+          WHERE id = $1
+            AND status = 'ready_for_confirmation'
+          RETURNING
+            id,
+            request_state,
+            status,
+            created_at,
+            updated_at
+        `,
+        [
+          requestId,
+          JSON.stringify(confirmedState),
+        ],
+      );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return mapRowToStoredRequest(row);
+  }
+
+  async claimForProcessing(
+    requestId: string,
+    processingState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const result =
+      await postgresPool.query<RequestSessionRow>(
+        `
+          UPDATE request_sessions
+          SET
+            request_state = $2::jsonb,
+            status = 'processing',
+            updated_at = NOW()
+          WHERE id = $1
+            AND status = 'confirmed'
+          RETURNING
+            id,
+            request_state,
+            status,
+            created_at,
+            updated_at
+        `,
+        [
+          requestId,
+          JSON.stringify(processingState),
+        ],
+      );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return mapRowToStoredRequest(row);
+  }
+
   async delete(
     requestId: string,
   ): Promise<boolean> {
