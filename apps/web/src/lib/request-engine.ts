@@ -11,7 +11,9 @@ import {
   getCustomerMovements,
 } from "@/lib/mock-bank-data";
 
-function requiresAccount(documentType: DocumentType): boolean {
+function requiresAccount(
+  documentType: DocumentType,
+): boolean {
   return (
     documentType === "account_statement" ||
     documentType === "position_statement" ||
@@ -19,19 +21,42 @@ function requiresAccount(documentType: DocumentType): boolean {
   );
 }
 
-function requiresDateRange(documentType: DocumentType): boolean {
+function requiresDateRange(
+  documentType: DocumentType,
+): boolean {
   return (
     documentType === "account_statement" ||
     documentType === "position_statement"
   );
 }
 
-function requiresLoan(documentType: DocumentType): boolean {
-  return documentType === "loan_amortization";
+function requiresLoan(
+  documentType: DocumentType,
+): boolean {
+  return (
+    documentType === "loan_amortization"
+  );
 }
 
-function requiresMovement(documentType: DocumentType): boolean {
-  return documentType === "swift_confirmation";
+function requiresMovement(
+  documentType: DocumentType,
+): boolean {
+  return (
+    documentType === "swift_confirmation"
+  );
+}
+
+export function isManualDocumentRequest(
+  request: DocumentRequest,
+): boolean {
+  return (
+    request.documentType === "unknown" &&
+    Boolean(
+      request.manualRequest
+        ?.requestedDocumentDescription
+        .trim(),
+    )
+  );
 }
 
 export function calculateMissingFields(
@@ -42,15 +67,26 @@ export function calculateMissingFields(
   if (!request.customer.dni?.trim()) {
     missingFields.push("dni");
   } else if (
-    request.customer.resolutionStatus !== "resolved"
+    request.customer.resolutionStatus !==
+    "resolved"
   ) {
     missingFields.push("customer");
 
     return missingFields;
   }
 
-  if (request.documentType === "unknown") {
+  const isManualRequest =
+    isManualDocumentRequest(request);
+
+  if (
+    request.documentType === "unknown" &&
+    !isManualRequest
+  ) {
     missingFields.push("documentType");
+  }
+
+  if (isManualRequest) {
+    return missingFields;
   }
 
   if (
@@ -60,7 +96,11 @@ export function calculateMissingFields(
     missingFields.push("account");
   }
 
-  if (requiresDateRange(request.documentType)) {
+  if (
+    requiresDateRange(
+      request.documentType,
+    )
+  ) {
     const hasDateRange =
       request.dateRange?.from?.trim() &&
       request.dateRange?.to?.trim();
@@ -78,7 +118,9 @@ export function calculateMissingFields(
   }
 
   if (
-    requiresMovement(request.documentType) &&
+    requiresMovement(
+      request.documentType,
+    ) &&
     !request.selectedMovement
   ) {
     missingFields.push("movement");
@@ -90,21 +132,35 @@ export function calculateMissingFields(
 export function isRequestReadyForConfirmation(
   request: DocumentRequest,
 ): boolean {
-  return calculateMissingFields(request).length === 0;
+  return (
+    calculateMissingFields(request)
+      .length === 0
+  );
 }
 
 export function updateRequestStatus(
   request: DocumentRequest,
 ): DocumentRequest {
-  if (request.status === "confirmed") {
+  if (
+    request.status === "confirmed" ||
+    request.status === "processing" ||
+    request.status ===
+      "pending_manual_processing" ||
+    request.status ===
+      "manual_processing" ||
+    request.status === "completed"
+  ) {
     return request;
   }
 
-  const missingFields = calculateMissingFields(request);
+  const missingFields =
+    calculateMissingFields(request);
 
   return {
     ...request,
+
     missingFields,
+
     status:
       missingFields.length === 0
         ? "ready_for_confirmation"
@@ -115,19 +171,25 @@ export function updateRequestStatus(
 export function confirmDocumentRequest(
   request: DocumentRequest,
 ): DocumentRequest {
-  const missingFields = calculateMissingFields(request);
+  const missingFields =
+    calculateMissingFields(request);
 
   if (missingFields.length > 0) {
     return {
       ...request,
+
       missingFields,
-      status: "collecting_information",
+
+      status:
+        "collecting_information",
     };
   }
 
   return {
     ...request,
+
     missingFields: [],
+
     status: "confirmed",
   };
 }
@@ -136,9 +198,11 @@ export function resolveCustomerFromDni(
   request: DocumentRequest,
   dni: string,
 ): DocumentRequest {
-  const normalizedDni = dni.trim().toUpperCase();
+  const normalizedDni =
+    dni.trim().toUpperCase();
 
-  const customer = findCustomerByDni(normalizedDni);
+  const customer =
+    findCustomerByDni(normalizedDni);
 
   if (!customer) {
     return updateRequestStatus({
@@ -162,29 +226,58 @@ export function resolveCustomerFromDni(
     });
   }
 
-  const accounts = getCustomerAccounts(customer.customerId);
-  const loans = getCustomerLoans(customer.customerId);
-  const movements = getCustomerMovements(customer.customerId);
+  const accounts =
+    getCustomerAccounts(
+      customer.customerId,
+    );
+
+  const loans =
+    getCustomerLoans(
+      customer.customerId,
+    );
+
+  const movements =
+    getCustomerMovements(
+      customer.customerId,
+    );
 
   return updateRequestStatus({
     ...request,
 
     customer: {
-      customerId: customer.customerId,
-      dni: customer.dni,
-      name: customer.name,
-      resolutionStatus: "resolved",
+      customerId:
+        customer.customerId,
+
+      dni:
+        customer.dni,
+
+      name:
+        customer.name,
+
+      resolutionStatus:
+        "resolved",
     },
 
-    availableAccounts: accounts,
+    availableAccounts:
+      accounts,
+
     selectedAccount:
-      accounts.length === 1 ? accounts[0] : null,
+      accounts.length === 1
+        ? accounts[0]
+        : null,
 
-    availableLoans: loans,
+    availableLoans:
+      loans,
+
     selectedLoan:
-      loans.length === 1 ? loans[0] : null,
+      loans.length === 1
+        ? loans[0]
+        : null,
 
-    availableMovements: movements,
-    selectedMovement: null,
+    availableMovements:
+      movements,
+
+    selectedMovement:
+      null,
   });
 }

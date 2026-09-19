@@ -14,6 +14,7 @@ import {
 
 import {
   confirmDocumentRequest,
+  isManualDocumentRequest,
   resolveCustomerFromDni,
   updateRequestStatus,
 } from "@/lib/request-engine";
@@ -75,6 +76,7 @@ interface AgentRequestBody {
 
 interface AgentExtraction {
   documentType: DocumentType;
+  requestedDocumentDescription: string | null;
   dni: string | null;
   accountLast4: string | null;
   loanLast4: string | null;
@@ -167,6 +169,13 @@ function parseExtraction(
 
   return {
     documentType,
+
+    requestedDocumentDescription:
+      typeof parsed.requestedDocumentDescription ===
+        "string" &&
+      parsed.requestedDocumentDescription.trim()
+        ? parsed.requestedDocumentDescription.trim()
+        : null,
 
     dni:
       typeof parsed.dni === "string" &&
@@ -317,6 +326,22 @@ function applyExtraction(
       ...documentRequest,
       documentType:
         extraction.documentType,
+      manualRequest: null,
+    };
+  } else if (
+    extraction.requestedDocumentDescription
+  ) {
+    documentRequest = {
+      ...documentRequest,
+      documentType: "unknown",
+      manualRequest: {
+        requestedDocumentDescription:
+          extraction.requestedDocumentDescription,
+      },
+      selectedAccount: null,
+      selectedLoan: null,
+      selectedMovement: null,
+      dateRange: null,
     };
   }
 
@@ -338,6 +363,9 @@ function applyExtraction(
     const preservedDateRange =
       documentRequest.dateRange;
 
+    const preservedManualRequest =
+      documentRequest.manualRequest;
+
     const preservedOriginalRequest =
       documentRequest.originalRequest;
 
@@ -353,6 +381,8 @@ function applyExtraction(
         preservedDocumentType,
       dateRange:
         preservedDateRange,
+      manualRequest:
+        preservedManualRequest,
       originalRequest:
         preservedOriginalRequest,
     };
@@ -482,6 +512,8 @@ function hasUsefulExtraction(
   return (
     extraction.documentType !==
       "unknown" ||
+    extraction.requestedDocumentDescription !==
+      null ||
     extraction.dni !== null ||
     extraction.accountLast4 !== null ||
     extraction.loanLast4 !== null ||
@@ -627,6 +659,19 @@ function getChangedFields(
   }
 
   if (
+    JSON.stringify(
+      before.manualRequest,
+    ) !==
+    JSON.stringify(
+      after.manualRequest,
+    )
+  ) {
+    changedFields.push(
+      "manualRequest",
+    );
+  }
+
+  if (
     before.customer.customerId !==
     after.customer.customerId
   ) {
@@ -757,6 +802,52 @@ async function recordRequestUpdateEvents(
       },
     );
   }
+}
+
+async function registerConfirmedManualRequest(
+  requestId: string,
+  requestState: DocumentRequest,
+) {
+  const pendingManualRequest: DocumentRequest = {
+    ...requestState,
+    status: "pending_manual_processing",
+  };
+
+  await saveRequestSession(
+    requestId,
+    pendingManualRequest,
+  );
+
+  await createRequestEvent(
+    requestId,
+    "manual_request_pending",
+    {
+      documentType:
+        pendingManualRequest.documentType,
+      requestedDocumentDescription:
+        pendingManualRequest.manualRequest
+          ?.requestedDocumentDescription ??
+        null,
+      customerId:
+        pendingManualRequest.customer
+          .customerId,
+      previousStatus: "confirmed",
+      status:
+        "pending_manual_processing",
+    },
+  );
+
+  return {
+    requestState:
+      pendingManualRequest,
+
+    nextAction: {
+      type:
+        "request_pending_manual_processing",
+      message:
+        "Solicitud registrada correctamente. Este documento requiere tramitación manual y ha quedado pendiente de gestión.",
+    },
+  };
 }
 
 async function processJustConfirmedRequest(
@@ -990,16 +1081,62 @@ export async function POST(
               customerId:
                 confirmationClaim.requestState
                   .customer.customerId,
+
+              processingMode:
+                isManualDocumentRequest(
+                  confirmationClaim.requestState,
+                )
+                  ? "manual"
+                  : "automatic",
             },
           );
+
+          if (
+            isManualDocumentRequest(
+              confirmationClaim.requestState,
+            )
+          ) {
+            const manualResult =
+              await registerConfirmedManualRequest(
+                storedRequest.requestId,
+                confirmationClaim.requestState,
+              );
+
+            return NextResponse.json({
+              requestId:
+                storedRequest.requestId,
+
+              receivedMessage: null,
+
+              agent: {
+                mode:
+                  "deterministic",
+                provider:
+                  "finora-engine",
+                model: null,
+              },
+
+              extraction: null,
+
+              requestState:
+                manualResult.requestState,
+
+              nextAction:
+                manualResult.nextAction,
+            });
+          }
         }
 
         /*
-         * Tanto el ganador del claim de confirmación
-         * como una petición concurrente continúan
+         * Las solicitudes automáticas continúan
          * hacia el dispatcher. Allí un segundo claim
          * atómico garantiza que solo una ejecución
          * pueda pasar de confirmed a processing.
+         *
+         * Una petición concurrente que no obtuvo el
+         * claim de confirmación también llega al
+         * dispatcher, que evita el procesamiento
+         * duplicado.
          */
         const processed =
           await processJustConfirmedRequest(
@@ -1307,6 +1444,7 @@ customer message. Do not answer the customer.
 Current date: ${today}
 
 Current document type: ${currentRequest.documentType}
+Current manual document description: ${currentRequest.manualRequest?.requestedDocumentDescription ?? "none"}
 Current next action expected by the deterministic engine: ${currentNextAction.type}
 
 Use this conversation context when interpreting ambiguous language.
@@ -1337,7 +1475,23 @@ Supported document types:
   bank transfer.
 
 - unknown:
-  only when the document cannot be reliably identified from this message.
+  use this when the customer is asking for a banking document that is not
+  one of the four automated document types above, OR when the document
+  cannot yet be reliably identified.
+
+For a banking document request that is clearly identifiable but is not
+one of the four automated document types:
+- set documentType to "unknown";
+- set requestedDocumentDescription to a short, faithful Spanish name for
+  the requested document;
+- examples include "certificado de titularidad", "certificado de deuda",
+  "certificado fiscal" or another clearly requested banking document;
+- do not map an unsupported document to a supported type merely because
+  it sounds similar.
+
+For greetings, insults, casual conversation or messages that do not
+contain a banking document request, requestedDocumentDescription must be
+null.
 
 Extract a Spanish DNI only when a complete DNI is explicitly provided.
 A DNI must contain 8 digits followed by one letter.
@@ -1384,6 +1538,7 @@ Return exactly this JSON shape:
 
 {
   "documentType": "account_statement" | "position_statement" | "loan_amortization" | "swift_confirmation" | "unknown",
+  "requestedDocumentDescription": string | null,
   "dni": string | null,
   "accountLast4": string | null,
   "loanLast4": string | null,
@@ -1619,16 +1774,60 @@ Return exactly this JSON shape:
             customerId:
               confirmationClaim.requestState
                 .customer.customerId,
+
+            processingMode:
+              isManualDocumentRequest(
+                confirmationClaim.requestState,
+              )
+                ? "manual"
+                : "automatic",
           },
         );
+
+        if (
+          isManualDocumentRequest(
+            confirmationClaim.requestState,
+          )
+        ) {
+          const manualResult =
+            await registerConfirmedManualRequest(
+              storedRequest.requestId,
+              confirmationClaim.requestState,
+            );
+
+          return NextResponse.json({
+            requestId:
+              storedRequest.requestId,
+
+            receivedMessage:
+              message,
+
+            agent: {
+              mode: "ai",
+              provider:
+                response.provider,
+              model:
+                response.model,
+              usage:
+                response.usage,
+            },
+
+            extraction,
+
+            requestState:
+              manualResult.requestState,
+
+            nextAction:
+              manualResult.nextAction,
+          });
+        }
       }
 
       /*
-       * También procesamos cuando la
-       * confirmación llega mediante
-       * lenguaje natural. El claim
-       * PostgreSQL evita que una segunda
-       * petición reabra el estado confirmed.
+       * Las solicitudes automáticas confirmadas
+       * continúan hacia el dispatcher. El claim
+       * PostgreSQL evita que una segunda petición
+       * reabra el estado confirmed.
        */
       const processed =
         await processJustConfirmedRequest(

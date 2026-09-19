@@ -116,6 +116,12 @@ function getStatusLabel(
     case "processing":
       return "Procesando";
 
+    case "pending_manual_processing":
+      return "Pendiente de tramitación manual";
+
+    case "manual_processing":
+      return "En tramitación manual";
+
     case "completed":
       return "Completada";
 
@@ -134,6 +140,12 @@ function getRecoveryMessage(
   switch (requestState.status) {
     case "processing":
       return "Tu solicitud está siendo procesada.";
+
+    case "pending_manual_processing":
+      return "Tu solicitud requiere tramitación manual y está pendiente de gestión.";
+
+    case "manual_processing":
+      return "Tu solicitud está siendo tramitada manualmente.";
 
     case "completed":
       return "Tu solicitud ya ha sido procesada correctamente y el documento está preparado.";
@@ -271,6 +283,14 @@ export default function RequestPage() {
     requestState?.status ===
     "processing";
 
+  const isPendingManualProcessing =
+    requestState?.status ===
+    "pending_manual_processing";
+
+  const isManualProcessing =
+    requestState?.status ===
+    "manual_processing";
+
   const isCompleted =
     requestState?.status ===
     "completed";
@@ -308,6 +328,8 @@ export default function RequestPage() {
   const isConversationClosed =
     isConfirmed ||
     isProcessing ||
+    isPendingManualProcessing ||
+    isManualProcessing ||
     isCompleted ||
     isFailed;
 
@@ -319,7 +341,9 @@ export default function RequestPage() {
   const shouldShowAccount =
     requestState !== null &&
     requestState.documentType !==
-      "loan_amortization";
+      "loan_amortization" &&
+    requestState.manualRequest ===
+      null;
 
   /*
    * Mostramos el periodo únicamente:
@@ -1148,7 +1172,9 @@ export default function RequestPage() {
             {isReadyForConfirmation && (
               <div className="mb-4 rounded-2xl border border-emerald-900/70 bg-emerald-950/20 p-4">
                 <p className="text-sm text-emerald-200">
-                  Finora ha recopilado toda la información necesaria.
+                  {requestState?.manualRequest
+                    ? "Finora ha identificado el documento y los datos del cliente. Esta solicitud requerirá tramitación manual."
+                    : "Finora ha recopilado toda la información necesaria."}
                 </p>
 
                 <button
@@ -1186,6 +1212,30 @@ export default function RequestPage() {
 
                 <p className="mt-1 text-sm text-slate-400">
                   Finora está procesando la solicitud y preparando el documento.
+                </p>
+              </div>
+            )}
+
+            {isPendingManualProcessing && (
+              <div className="rounded-2xl border border-amber-800/70 bg-amber-950/20 px-5 py-4">
+                <p className="font-medium text-amber-200">
+                  Pendiente de tramitación manual
+                </p>
+
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  La solicitud ha sido registrada correctamente. Un gestor deberá tramitar el documento antes de que pueda quedar disponible para el cliente.
+                </p>
+              </div>
+            )}
+
+            {isManualProcessing && (
+              <div className="rounded-2xl border border-sky-900/70 bg-sky-950/30 px-5 py-4">
+                <p className="font-medium text-sky-300">
+                  Solicitud en tramitación manual
+                </p>
+
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  Un gestor está tramitando esta solicitud. El documento se incorporará a Finora cuando finalice la gestión.
                 </p>
               </div>
             )}
@@ -1583,13 +1633,19 @@ export default function RequestPage() {
                 </p>
 
                 <p className="mt-1 font-medium">
-                  {
+                  {requestState.manualRequest
+                    ?.requestedDocumentDescription ??
                     documentTypeLabels[
                       requestState
                         .documentType
-                    ]
-                  }
+                    ]}
                 </p>
+
+                {requestState.manualRequest && (
+                  <p className="mt-1 text-xs text-amber-300">
+                    Tramitación manual
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1702,9 +1758,16 @@ export default function RequestPage() {
                       ? "text-red-300"
                       : requestState
                             .status ===
-                          "processing"
+                          "processing" ||
+                          requestState
+                            .status ===
+                          "manual_processing"
                         ? "text-sky-300"
-                        : "text-emerald-400"
+                        : requestState
+                              .status ===
+                            "pending_manual_processing"
+                          ? "text-amber-300"
+                          : "text-emerald-400"
                   }`}
                 >
                   {getStatusLabel(

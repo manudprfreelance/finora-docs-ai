@@ -1,4 +1,10 @@
-import { DocumentRequest } from "@/lib/request-types";
+import {
+  DocumentRequest,
+} from "@/lib/request-types";
+
+import {
+  isManualDocumentRequest,
+} from "@/lib/request-engine";
 
 export type NextActionType =
   | "ask_dni"
@@ -9,7 +15,10 @@ export type NextActionType =
   | "ask_loan"
   | "ask_movement"
   | "confirm_request"
-  | "request_confirmed";
+  | "request_confirmed"
+  | "request_pending_manual_processing"
+  | "request_manual_processing"
+  | "request_completed";
 
 export interface NextAction {
   type: NextActionType;
@@ -19,95 +28,187 @@ export interface NextAction {
 export function getNextAction(
   request: DocumentRequest,
 ): NextAction {
-  if (request.status === "confirmed") {
+  if (
+    request.status ===
+    "pending_manual_processing"
+  ) {
     return {
-      type: "request_confirmed",
+      type:
+        "request_pending_manual_processing",
+
       message:
-        "Solicitud confirmada correctamente. Ya está preparada para su procesamiento.",
+        "La solicitud ha quedado registrada para tramitación manual.",
     };
   }
 
-  if (request.missingFields.includes("dni")) {
+  if (
+    request.status ===
+    "manual_processing"
+  ) {
+    return {
+      type:
+        "request_manual_processing",
+
+      message:
+        "La solicitud está siendo tramitada manualmente.",
+    };
+  }
+
+  if (
+    request.status === "completed"
+  ) {
+    return {
+      type: "request_completed",
+
+      message:
+        "La solicitud se ha completado.",
+    };
+  }
+
+  if (
+    request.status === "confirmed"
+  ) {
+    return {
+      type: "request_confirmed",
+
+      message:
+        isManualDocumentRequest(request)
+          ? "Solicitud confirmada correctamente. Se enviará para su tramitación manual."
+          : "Solicitud confirmada correctamente. Ya está preparada para su procesamiento.",
+    };
+  }
+
+  if (
+    request.missingFields.includes(
+      "dni",
+    )
+  ) {
     return {
       type: "ask_dni",
+
       message:
         "Por favor, indícame tu DNI para poder identificar tu perfil.",
     };
   }
 
   if (
-    request.customer.resolutionStatus === "not_found"
+    request.customer.resolutionStatus ===
+    "not_found"
   ) {
     return {
-      type: "customer_not_found",
-      message: `No he encontrado ningún cliente asociado al DNI ${request.customer.dni}. Comprueba que esté escrito correctamente y vuelve a indicármelo.`,
+      type:
+        "customer_not_found",
+
+      message:
+        `No he encontrado ningún cliente asociado al DNI ${request.customer.dni}. Comprueba que esté escrito correctamente y vuelve a indicármelo.`,
     };
   }
 
-  if (request.missingFields.includes("customer")) {
+  if (
+    request.missingFields.includes(
+      "customer",
+    )
+  ) {
     return {
-      type: "customer_not_found",
+      type:
+        "customer_not_found",
+
       message:
         "No he podido identificar tu perfil. Comprueba el DNI e inténtalo de nuevo.",
     };
   }
 
-  if (request.missingFields.includes("documentType")) {
+  if (
+    request.missingFields.includes(
+      "documentType",
+    )
+  ) {
     return {
-      type: "ask_document_type",
+      type:
+        "ask_document_type",
+
       message:
         "¿Qué documento necesitas? Puedes explicármelo con tus propias palabras.",
     };
   }
 
-  if (request.missingFields.includes("account")) {
-    if (request.availableAccounts.length > 1) {
-      const accountOptions = request.availableAccounts
-        .map(
-          (account) =>
-            `${account.accountName} ${account.maskedAccountNumber}`,
-        )
-        .join(", ");
+  if (
+    request.missingFields.includes(
+      "account",
+    )
+  ) {
+    if (
+      request.availableAccounts.length >
+      1
+    ) {
+      const accountOptions =
+        request.availableAccounts
+          .map(
+            (account) =>
+              `${account.accountName} ${account.maskedAccountNumber}`,
+          )
+          .join(", ");
 
       return {
         type: "ask_account",
-        message: `He encontrado varias cuentas asociadas a tu perfil: ${accountOptions}. ¿Cuál quieres utilizar para esta solicitud?`,
+
+        message:
+          `He encontrado varias cuentas asociadas a tu perfil: ${accountOptions}. ¿Cuál quieres utilizar para esta solicitud?`,
       };
     }
 
     return {
       type: "ask_account",
+
       message:
         "Necesito identificar qué cuenta debemos utilizar para esta solicitud.",
     };
   }
 
-  if (request.missingFields.includes("loan")) {
-    if (request.availableLoans.length > 1) {
-      const loanOptions = request.availableLoans
-        .map(
-          (loan) =>
-            `${loan.loanName} ${loan.maskedLoanNumber}`,
-        )
-        .join(", ");
+  if (
+    request.missingFields.includes(
+      "loan",
+    )
+  ) {
+    if (
+      request.availableLoans.length > 1
+    ) {
+      const loanOptions =
+        request.availableLoans
+          .map(
+            (loan) =>
+              `${loan.loanName} ${loan.maskedLoanNumber}`,
+          )
+          .join(", ");
 
       return {
         type: "ask_loan",
-        message: `He encontrado varios préstamos asociados a tu perfil: ${loanOptions}. ¿Para cuál necesitas el cuadro de amortización?`,
+
+        message:
+          `He encontrado varios préstamos asociados a tu perfil: ${loanOptions}. ¿Para cuál necesitas el cuadro de amortización?`,
       };
     }
 
     return {
       type: "ask_loan",
+
       message:
         "Necesito identificar para qué préstamo necesitas el cuadro de amortización.",
     };
   }
 
-  if (request.missingFields.includes("movement")) {
-    if (request.availableMovements.length > 0) {
+  if (
+    request.missingFields.includes(
+      "movement",
+    )
+  ) {
+    if (
+      request.availableMovements.length >
+      0
+    ) {
       return {
         type: "ask_movement",
+
         message:
           "¿De qué operación necesitas la confirmación SWIFT? Puedes indicarme la fecha, el importe o el beneficiario.",
       };
@@ -115,21 +216,40 @@ export function getNextAction(
 
     return {
       type: "ask_movement",
+
       message:
         "No he podido identificar la operación necesaria para generar la confirmación SWIFT.",
     };
   }
 
-  if (request.missingFields.includes("dateRange")) {
+  if (
+    request.missingFields.includes(
+      "dateRange",
+    )
+  ) {
     return {
-      type: "ask_date_range",
+      type:
+        "ask_date_range",
+
       message:
         "¿Qué periodo de fechas quieres que incluya el documento?",
     };
   }
 
+  if (
+    isManualDocumentRequest(request)
+  ) {
+    return {
+      type: "confirm_request",
+
+      message:
+        `He identificado la solicitud de "${request.manualRequest?.requestedDocumentDescription}". Este documento requiere tramitación manual. Revisa los datos y confirma la solicitud.`,
+    };
+  }
+
   return {
     type: "confirm_request",
+
     message:
       "Ya tengo toda la información necesaria. Revisa los datos y confirma la solicitud.",
   };

@@ -10,6 +10,8 @@ export type RequestStatus =
   | "ready_for_confirmation"
   | "confirmed"
   | "processing"
+  | "pending_manual_processing"
+  | "manual_processing"
   | "completed"
   | "failed";
 
@@ -89,8 +91,7 @@ export interface SwiftTransferDetails {
    */
   orderingCustomerName: string;
 
-  orderingAccount:
-    string;
+  orderingAccount: string;
 
   /*
    * Datos del beneficiario.
@@ -164,6 +165,10 @@ export interface DateRange {
   to: string | null;
 }
 
+export interface ManualDocumentRequest {
+  requestedDocumentDescription: string;
+}
+
 export type MissingField =
   | "dni"
   | "customer"
@@ -179,6 +184,8 @@ export interface DocumentRequest {
   customer: CustomerIdentity;
 
   documentType: DocumentType;
+
+  manualRequest: ManualDocumentRequest | null;
 
   availableAccounts: CustomerAccount[];
 
@@ -215,6 +222,8 @@ export const createEmptyDocumentRequest =
     },
 
     documentType: "unknown",
+
+    manualRequest: null,
 
     availableAccounts: [],
 
