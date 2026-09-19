@@ -28,12 +28,29 @@ interface AgentApiResponse {
     model: string | null;
   };
 
+  degradedMode?: {
+    active?: boolean;
+    validationErrors?: string[];
+  };
+
+  validationErrors?: string[];
+
   requestState: DocumentRequest;
 
   nextAction: {
     type: string;
     message: string;
   };
+}
+
+interface DegradedRequestForm {
+  documentType: DocumentType;
+  dni: string;
+  accountId: string;
+  loanId: string;
+  movementId: string;
+  dateFrom: string;
+  dateTo: string;
 }
 
 interface AgentApiError {
@@ -216,6 +233,32 @@ export default function RequestPage() {
       null,
     );
 
+  const [
+    isDegradedMode,
+    setIsDegradedMode,
+  ] =
+    useState(false);
+
+  const [
+    degradedValidationErrors,
+    setDegradedValidationErrors,
+  ] =
+    useState<string[]>([]);
+
+  const [
+    degradedForm,
+    setDegradedForm,
+  ] =
+    useState<DegradedRequestForm>({
+      documentType: "unknown",
+      dni: "",
+      accountId: "",
+      loanId: "",
+      movementId: "",
+      dateFrom: "",
+      dateTo: "",
+    });
+
   const isReadyForConfirmation =
     requestState?.status ===
     "ready_for_confirmation";
@@ -302,6 +345,56 @@ export default function RequestPage() {
         )
       )
     );
+
+  const isDegradedCustomerResolved =
+    requestState?.customer
+      .resolutionStatus === "resolved";
+
+  function synchronizeDegradedForm(
+    state: DocumentRequest,
+  ) {
+    setDegradedForm(
+      (current) => ({
+        documentType:
+          state.documentType !== "unknown"
+            ? state.documentType
+            : current.documentType,
+        dni:
+          state.customer.dni ??
+          current.dni,
+        accountId:
+          state.selectedAccount?.accountId ??
+          current.accountId,
+        loanId:
+          state.selectedLoan?.loanId ??
+          current.loanId,
+        movementId:
+          state.selectedMovement?.movementId ??
+          current.movementId,
+        dateFrom:
+          state.dateRange?.from ??
+          current.dateFrom,
+        dateTo:
+          state.dateRange?.to ??
+          current.dateTo,
+      }),
+    );
+  }
+
+  function activateDegradedMode(
+    data: AgentApiResponse,
+  ) {
+    setIsDegradedMode(true);
+    synchronizeDegradedForm(
+      data.requestState,
+    );
+    setDegradedValidationErrors(
+      data.validationErrors ??
+        data.degradedMode
+          ?.validationErrors ??
+        [],
+    );
+  }
 
   function appendAssistantMessage(
     content: string,
@@ -496,6 +589,20 @@ export default function RequestPage() {
           action:
             "confirm_request";
           requestId: string;
+        }
+      | {
+          action:
+            "submit_degraded_request";
+          requestId: string;
+          degradedRequest: {
+            documentType: DocumentType;
+            dni: string;
+            accountId: string | null;
+            loanId: string | null;
+            movementId: string | null;
+            dateFrom: string | null;
+            dateTo: string | null;
+          };
         },
   ): Promise<AgentApiResponse> {
     const response =
@@ -610,6 +717,17 @@ export default function RequestPage() {
         data.requestState,
       );
 
+      if (
+        data.nextAction.type ===
+          "ai_degraded_mode" ||
+        data.agent.mode ===
+          "degraded"
+      ) {
+        activateDegradedMode(
+          data,
+        );
+      }
+
       appendAssistantMessage(
         data.nextAction.message,
       );
@@ -621,6 +739,105 @@ export default function RequestPage() {
         Error
           ? requestError
               .message
+          : "Se ha producido un error inesperado.";
+
+      setError(
+        errorMessage,
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleDegradedSubmit(
+    event:
+      FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (
+      !requestId ||
+      isLoading
+    ) {
+      return;
+    }
+
+    setError(null);
+    setDegradedValidationErrors([]);
+    setIsLoading(true);
+
+    try {
+      const data =
+        await sendAgentRequest(
+          {
+            action:
+              "submit_degraded_request",
+            requestId,
+            degradedRequest: {
+              documentType:
+                degradedForm.documentType,
+              dni:
+                degradedForm.dni
+                  .trim()
+                  .toUpperCase(),
+              accountId:
+                degradedForm.accountId ||
+                null,
+              loanId:
+                degradedForm.loanId ||
+                null,
+              movementId:
+                degradedForm.movementId ||
+                null,
+              dateFrom:
+                degradedForm.dateFrom ||
+                null,
+              dateTo:
+                degradedForm.dateTo ||
+                null,
+            },
+          },
+        );
+
+      setRequestState(
+        data.requestState,
+      );
+
+      synchronizeDegradedForm(
+        data.requestState,
+      );
+
+      const validationErrors =
+        data.validationErrors ??
+        data.degradedMode
+          ?.validationErrors ??
+        [];
+
+      setDegradedValidationErrors(
+        validationErrors,
+      );
+
+      if (
+        data.requestState.status ===
+          "ready_for_confirmation"
+      ) {
+        setIsDegradedMode(
+          false,
+        );
+      }
+
+      appendAssistantMessage(
+        validationErrors.length > 0
+          ? "Revisa los datos del modo de contingencia. Hay información que todavía no es válida o está pendiente."
+          : data.nextAction.message,
+      );
+    } catch (
+      requestError
+    ) {
+      const errorMessage =
+        requestError instanceof
+        Error
+          ? requestError.message
           : "Se ha producido un error inesperado.";
 
       setError(
@@ -826,6 +1043,17 @@ export default function RequestPage() {
 
     setInput("");
     setError(null);
+    setIsDegradedMode(false);
+    setDegradedValidationErrors([]);
+    setDegradedForm({
+      documentType: "unknown",
+      dni: "",
+      accountId: "",
+      loanId: "",
+      movementId: "",
+      dateFrom: "",
+      dateTo: "",
+    });
   }
 
   return (
@@ -1003,7 +1231,290 @@ export default function RequestPage() {
               </div>
             )}
 
-            {!isConversationClosed && (
+            {!isConversationClosed && isDegradedMode && (
+              <div className="mb-4 rounded-2xl border border-amber-800/70 bg-amber-950/20 p-5">
+                <p className="font-medium text-amber-200">
+                  Modo de contingencia
+                </p>
+
+                <p className="mt-1 text-sm leading-6 text-slate-400">
+                  La interpretación automática no está disponible. Introduce los datos de forma estructurada; Finora los validará en el servidor antes de continuar.
+                </p>
+
+                {degradedValidationErrors.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/30 px-4 py-3">
+                    {degradedValidationErrors.map(
+                      (validationError) => (
+                        <p
+                          key={validationError}
+                          className="text-sm text-red-300"
+                        >
+                          {validationError}
+                        </p>
+                      ),
+                    )}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={handleDegradedSubmit}
+                  className="mt-5 grid gap-4 md:grid-cols-2"
+                >
+                  <label className="text-sm text-slate-300">
+                    Tipo de documento
+                    <select
+                      value={degradedForm.documentType}
+                      onChange={(event) =>
+                        setDegradedForm((current) => ({
+                          ...current,
+                          documentType:
+                            event.target.value as DocumentType,
+                          accountId: "",
+                          loanId: "",
+                          movementId: "",
+                        }))
+                      }
+                      disabled={isLoading}
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500"
+                    >
+                      <option value="unknown">
+                        Selecciona un documento
+                      </option>
+                      <option value="account_statement">
+                        Extracto de cuenta
+                      </option>
+                      <option value="position_statement">
+                        Estado de posición
+                      </option>
+                      <option value="loan_amortization">
+                        Cuadro de amortización
+                      </option>
+                      <option value="swift_confirmation">
+                        Confirmación SWIFT
+                      </option>
+                    </select>
+                  </label>
+
+                  <label className="text-sm text-slate-300">
+                    DNI
+                    <input
+                      value={degradedForm.dni}
+                      onChange={(event) =>
+                        setDegradedForm((current) => ({
+                          ...current,
+                          dni: event.target.value.toUpperCase(),
+                        }))
+                      }
+                      disabled={isLoading}
+                      placeholder="12345678A"
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:border-amber-500"
+                    />
+                  </label>
+
+                  {isDegradedCustomerResolved &&
+                    (degradedForm.documentType === "account_statement" ||
+                      degradedForm.documentType === "position_statement" ||
+                      degradedForm.documentType === "swift_confirmation") && (
+                    <label className="text-sm text-slate-300">
+                      Cuenta
+                      <select
+                        value={degradedForm.accountId}
+                        onChange={(event) =>
+                          setDegradedForm((current) => ({
+                            ...current,
+                            accountId: event.target.value,
+                            movementId: "",
+                          }))
+                        }
+                        disabled={isLoading}
+                        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500"
+                      >
+                        <option value="">
+                          Selecciona una cuenta
+                        </option>
+                        {requestState?.availableAccounts.map(
+                          (account) => (
+                            <option
+                              key={account.accountId}
+                              value={account.accountId}
+                            >
+                              {account.accountName} {account.maskedAccountNumber}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  )}
+
+                  {isDegradedCustomerResolved &&
+                    degradedForm.documentType === "loan_amortization" && (
+                    <label className="text-sm text-slate-300">
+                      Préstamo
+                      <select
+                        value={degradedForm.loanId}
+                        onChange={(event) =>
+                          setDegradedForm((current) => ({
+                            ...current,
+                            loanId: event.target.value,
+                          }))
+                        }
+                        disabled={isLoading}
+                        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500"
+                      >
+                        <option value="">
+                          Selecciona un préstamo
+                        </option>
+                        {requestState?.availableLoans.map(
+                          (loan) => (
+                            <option
+                              key={loan.loanId}
+                              value={loan.loanId}
+                            >
+                              {loan.loanName} {loan.maskedLoanNumber}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  )}
+
+                  {isDegradedCustomerResolved &&
+                    degradedForm.documentType === "swift_confirmation" && (
+                    <label className="text-sm text-slate-300 md:col-span-2">
+                      Operación SWIFT
+                      <select
+                        value={degradedForm.movementId}
+                        onChange={(event) =>
+                          setDegradedForm((current) => ({
+                            ...current,
+                            movementId: event.target.value,
+                          }))
+                        }
+                        disabled={isLoading || !degradedForm.accountId}
+                        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500 disabled:opacity-50"
+                      >
+                        <option value="">
+                          Selecciona una operación
+                        </option>
+                        {requestState?.availableMovements
+                          .filter(
+                            (movement) =>
+                              !degradedForm.accountId ||
+                              movement.accountId === degradedForm.accountId,
+                          )
+                          .filter(
+                            (movement) =>
+                              movement.swiftDetails != null,
+                          )
+                          .map(
+                            (movement) => (
+                              <option
+                                key={movement.movementId}
+                                value={movement.movementId}
+                              >
+                                {movement.date} · {movement.description} · {movement.amount} {movement.currency}
+                              </option>
+                            ),
+                          )}
+                      </select>
+                    </label>
+                  )}
+
+                  {isDegradedCustomerResolved &&
+                    (degradedForm.documentType === "account_statement" ||
+                      degradedForm.documentType === "position_statement") && (
+                    <>
+                      <label className="text-sm text-slate-300">
+                        Fecha inicial
+                        <input
+                          type="date"
+                          value={degradedForm.dateFrom}
+                          onChange={(event) =>
+                            setDegradedForm((current) => ({
+                              ...current,
+                              dateFrom: event.target.value,
+                            }))
+                          }
+                          disabled={isLoading}
+                          className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500"
+                        />
+                      </label>
+
+                      <label className="text-sm text-slate-300">
+                        Fecha final
+                        <input
+                          type="date"
+                          value={degradedForm.dateTo}
+                          onChange={(event) =>
+                            setDegradedForm((current) => ({
+                              ...current,
+                              dateTo: event.target.value,
+                            }))
+                          }
+                          disabled={isLoading}
+                          className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-amber-500"
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  <div className="md:col-span-2">
+                    {!isDegradedCustomerResolved ? (
+                      <div>
+                        <p className="mb-3 text-sm leading-6 text-slate-400">
+                          Primero identificaremos al cliente con el DNI. Las cuentas, préstamos y operaciones disponibles se cargarán desde los datos bancarios del servidor.
+                        </p>
+
+                        <button
+                          type="submit"
+                          disabled={
+                            isLoading ||
+                            degradedForm.documentType === "unknown" ||
+                            !degradedForm.dni.trim()
+                          }
+                          className="rounded-xl bg-amber-400 px-5 py-3 font-medium text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isLoading
+                            ? "Identificando cliente..."
+                            : "Identificar cliente"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="mb-4 rounded-xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-3">
+                          <p className="text-sm font-medium text-emerald-300">
+                            Cliente identificado
+                          </p>
+
+                          <p className="mt-1 text-sm text-slate-300">
+                            {requestState?.customer.name}
+                            {requestState?.customer.dni
+                              ? ` · DNI ${requestState.customer.dni}`
+                              : ""}
+                          </p>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={
+                            isLoading ||
+                            degradedForm.documentType === "unknown" ||
+                            !degradedForm.dni.trim()
+                          }
+                          className="rounded-xl bg-amber-400 px-5 py-3 font-medium text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isLoading
+                            ? "Validando datos..."
+                            : "Validar datos y continuar"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {!isConversationClosed && !isDegradedMode && (
               <form
                 onSubmit={
                   handleSubmit

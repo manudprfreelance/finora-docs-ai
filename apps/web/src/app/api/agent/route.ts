@@ -58,10 +58,18 @@ import {
   shouldActivateAIDegradedMode,
 } from "@/lib/server/ai/ai-degraded-mode";
 
+import {
+  applyDegradedRequestInput,
+  DegradedRequestInput,
+} from "@/lib/server/ai/degraded-request-engine";
+
 interface AgentRequestBody {
   message?: string;
   requestId?: string | null;
-  action?: "confirm_request";
+  action?:
+    | "confirm_request"
+    | "submit_degraded_request";
+  degradedRequest?: DegradedRequestInput;
 }
 
 interface AgentExtraction {
@@ -87,7 +95,7 @@ function parseExtraction(
 
   if (!cleanedOutput) {
     throw new AIInvalidResponseError(
-      "OpenAI ha devuelto una respuesta vacÃƒÆ’Ã‚Â­a.",
+      "OpenAI ha devuelto una respuesta vacía.",
       {
         details: {
           provider: "openai",
@@ -109,7 +117,7 @@ function parseExtraction(
       Array.isArray(parsedValue)
     ) {
       throw new AIInvalidResponseError(
-        "OpenAI ha devuelto una estructura JSON no vÃƒÆ’Ã‚Â¡lida.",
+        "OpenAI ha devuelto una estructura JSON no válida.",
         {
           details: {
             provider: "openai",
@@ -130,7 +138,7 @@ function parseExtraction(
     }
 
     throw new AIInvalidResponseError(
-      "OpenAI ha devuelto una respuesta que no contiene JSON vÃƒÆ’Ã‚Â¡lido.",
+      "OpenAI ha devuelto una respuesta que no contiene JSON válido.",
       {
         cause: error,
         details: {
@@ -225,9 +233,9 @@ function normalizeExtractionForContext(
   };
 
   /*
-   * Si Finora estÃƒÆ’Ã‚Â¡ esperando un prÃƒÆ’Ã‚Â©stamo
-   * para un cuadro de amortizaciÃƒÆ’Ã‚Â³n y el
-   * modelo interpreta los cuatro dÃƒÆ’Ã‚Â­gitos
+   * Si Finora está esperando un préstamo
+   * para un cuadro de amortización y el
+   * modelo interpreta los cuatro dígitos
    * como una cuenta, usamos el contexto
    * determinista para corregirlo.
    */
@@ -500,7 +508,7 @@ function buildContextualNextAction(
     return {
       type: "customer_not_found",
       message:
-        "Esta solicitud ya estÃƒÆ’Ã‚Â¡ asociada a otro cliente. Para trabajar con un cliente diferente, inicia una nueva solicitud.",
+        "Esta solicitud ya está asociada a otro cliente. Para trabajar con un cliente diferente, inicia una nueva solicitud.",
     };
   }
 
@@ -528,7 +536,7 @@ function buildContextualNextAction(
       return {
         type: "ask_document_type",
         message:
-          "No he podido identificar quÃƒÆ’Ã‚Â© documento bancario necesitas. Puedes pedirme, por ejemplo, un extracto de cuenta, un cuadro de amortizaciÃƒÆ’Ã‚Â³n o una confirmaciÃƒÆ’Ã‚Â³n SWIFT.",
+          "No he podido identificar qué documento bancario necesitas. Puedes pedirme, por ejemplo, un extracto de cuenta, un cuadro de amortización o una confirmación SWIFT.",
       };
     }
 
@@ -538,7 +546,7 @@ function buildContextualNextAction(
       return {
         type: "ask_account",
         message:
-          "No he podido identificar la cuenta en tu mensaje. IndÃƒÆ’Ã‚Â­came los ÃƒÆ’Ã‚Âºltimos cuatro dÃƒÆ’Ã‚Â­gitos de una de las cuentas asociadas a tu perfil.",
+          "No he podido identificar la cuenta en tu mensaje. Indícame los últimos cuatro dígitos de una de las cuentas asociadas a tu perfil.",
       };
     }
 
@@ -548,7 +556,7 @@ function buildContextualNextAction(
       return {
         type: "ask_loan",
         message:
-          "No he podido identificar el prÃƒÆ’Ã‚Â©stamo. IndÃƒÆ’Ã‚Â­came los ÃƒÆ’Ã‚Âºltimos cuatro dÃƒÆ’Ã‚Â­gitos del prÃƒÆ’Ã‚Â©stamo para el que necesitas el cuadro de amortizaciÃƒÆ’Ã‚Â³n.",
+          "No he podido identificar el préstamo. Indícame los últimos cuatro dígitos del préstamo para el que necesitas el cuadro de amortización.",
       };
     }
 
@@ -559,7 +567,7 @@ function buildContextualNextAction(
       return {
         type: "ask_date_range",
         message:
-          "No he podido identificar el periodo. IndÃƒÆ’Ã‚Â­came una fecha inicial y una fecha final, por ejemplo: del 1 al 31 de julio de 2026.",
+          "No he podido identificar el periodo. Indícame una fecha inicial y una fecha final, por ejemplo: del 1 al 31 de julio de 2026.",
       };
     }
 
@@ -570,7 +578,7 @@ function buildContextualNextAction(
       return {
         type: "ask_movement",
         message:
-          "No he podido identificar la operaciÃƒÆ’Ã‚Â³n. Puedes indicarme la fecha, el importe o el beneficiario de la transferencia.",
+          "No he podido identificar la operación. Puedes indicarme la fecha, el importe o el beneficiario de la transferencia.",
       };
     }
   }
@@ -583,7 +591,7 @@ function buildContextualNextAction(
   ) {
     return {
       type: "ask_account",
-      message: `No he encontrado ninguna cuenta de tu perfil terminada en ${extraction.accountLast4}. IndÃƒÆ’Ã‚Â­came una de las cuentas asociadas a tu perfil.`,
+      message: `No he encontrado ninguna cuenta de tu perfil terminada en ${extraction.accountLast4}. Indícame una de las cuentas asociadas a tu perfil.`,
     };
   }
 
@@ -595,7 +603,7 @@ function buildContextualNextAction(
   ) {
     return {
       type: "ask_loan",
-      message: `No he encontrado ningÃƒÆ’Ã‚Âºn prÃƒÆ’Ã‚Â©stamo de tu perfil terminado en ${extraction.loanLast4}. IndÃƒÆ’Ã‚Â­came uno de los prÃƒÆ’Ã‚Â©stamos asociados a tu perfil.`,
+      message: `No he encontrado ningún préstamo de tu perfil terminado en ${extraction.loanLast4}. Indícame uno de los préstamos asociados a tu perfil.`,
     };
   }
 
@@ -770,7 +778,7 @@ async function processJustConfirmedRequest(
         type:
           "request_processing_completed",
         message:
-          "Solicitud procesada correctamente. El documento ya estÃƒÆ’Ã‚Â¡ preparado.",
+          "Solicitud procesada correctamente. El documento ya está preparado.",
       },
     };
   }
@@ -820,7 +828,7 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            "No se ha encontrado la sesiÃƒÆ’Ã‚Â³n de la solicitud.",
+            "No se ha encontrado la sesión de la solicitud.",
           code:
             "SESSION_NOT_FOUND",
         },
@@ -882,8 +890,8 @@ export async function POST(
       (await request.json()) as AgentRequestBody;
 
     /*
-     * ConfirmaciÃƒÆ’Ã‚Â³n explÃƒÆ’Ã‚Â­cita desde
-     * el botÃƒÆ’Ã‚Â³n de la interfaz.
+     * Confirmación explícita desde
+     * el botón de la interfaz.
      */
     if (
       body.action ===
@@ -893,7 +901,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "No se ha encontrado la sesiÃƒÆ’Ã‚Â³n de la solicitud.",
+              "No se ha encontrado la sesión de la solicitud.",
             code:
               "SESSION_REQUIRED",
           },
@@ -912,7 +920,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "La sesiÃƒÆ’Ã‚Â³n de la solicitud ha caducado. Inicia una nueva solicitud.",
+              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
             code:
               "SESSION_NOT_FOUND",
           },
@@ -1028,6 +1036,125 @@ export async function POST(
       });
     }
 
+    /*
+     * Modo de contingencia determinista.
+     *
+     * El navegador solo envía identificadores y datos
+     * estructurados. El servidor vuelve a resolver y
+     * validar toda la información contra los datos
+     * bancarios de confianza.
+     */
+    if (
+      body.action ===
+      "submit_degraded_request"
+    ) {
+      if (!body.requestId) {
+        return NextResponse.json(
+          {
+            error:
+              "No se ha encontrado la sesión de la solicitud.",
+            code:
+              "SESSION_REQUIRED",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      if (!body.degradedRequest) {
+        return NextResponse.json(
+          {
+            error:
+              "Los datos del modo de contingencia son obligatorios.",
+            code:
+              "DEGRADED_REQUEST_REQUIRED",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      const storedRequest =
+        await getRequestSession(
+          body.requestId,
+        );
+
+      if (!storedRequest) {
+        return NextResponse.json(
+          {
+            error:
+              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
+            code:
+              "SESSION_NOT_FOUND",
+          },
+          {
+            status: 404,
+          },
+        );
+      }
+
+      const currentRequest =
+        storedRequest.requestState;
+
+      const degradedResult =
+        applyDegradedRequestInput(
+          currentRequest,
+          body.degradedRequest,
+        );
+
+      const documentRequest =
+        degradedResult.requestState;
+
+      await saveRequestSession(
+        storedRequest.requestId,
+        documentRequest,
+      );
+
+      await recordRequestUpdateEvents(
+        storedRequest.requestId,
+        currentRequest,
+        documentRequest,
+      );
+
+      const nextAction =
+        getNextAction(
+          documentRequest,
+        );
+
+      return NextResponse.json({
+        requestId:
+          storedRequest.requestId,
+
+        receivedMessage: null,
+
+        agent: {
+          mode:
+            "degraded",
+          provider:
+            "finora-engine",
+          model: null,
+        },
+
+        degradedMode: {
+          active: true,
+          validationErrors:
+            degradedResult.validationErrors,
+        },
+
+        extraction: null,
+
+        requestState:
+          documentRequest,
+
+        validationErrors:
+          degradedResult.validationErrors,
+
+        nextAction,
+      });
+    }
+
     if (
       !process.env.OPENAI_API_KEY
     ) {
@@ -1070,7 +1197,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "La sesiÃƒÆ’Ã‚Â³n de la solicitud ha caducado. Inicia una nueva solicitud.",
+              "La sesión de la solicitud ha caducado. Inicia una nueva solicitud.",
             code:
               "SESSION_NOT_FOUND",
           },
@@ -1099,7 +1226,7 @@ export async function POST(
     /*
      * Registramos la existencia del mensaje,
      * pero no duplicamos el texto completo
-     * dentro de la auditorÃƒÆ’Ã‚Â­a.
+     * dentro de la auditoría.
      */
     await createRequestEvent(
       storedRequest.requestId,
@@ -1170,7 +1297,7 @@ Supported document types:
   positions or financial position.
 
 - loan_amortization:
-  loan or mortgage amortization schedule, cuadro de amortizaciÃƒÆ’Ã‚Â³n.
+  loan or mortgage amortization schedule, cuadro de amortización.
 
 - swift_confirmation:
   SWIFT confirmation, justificante SWIFT or proof of an international
@@ -1201,13 +1328,13 @@ For transfer movements:
 
 Set confirmRequest to true only when the customer is clearly confirming
 the current request, for example:
-- "sÃƒÆ’Ã‚Â­, confirma"
+- "sí, confirma"
 - "confirmo"
 - "adelante"
-- "estÃƒÆ’Ã‚Â¡ correcto"
+- "está correcto"
 - "puedes tramitarlo"
 
-Do not interpret a generic "sÃƒÆ’Ã‚Â­" as confirmation unless it clearly refers
+Do not interpret a generic "sí" as confirmation unless it clearly refers
 to confirming the request.
 
 Messages unrelated to banking document requests, insults, greetings or
@@ -1460,8 +1587,8 @@ Return exactly this JSON shape:
       );
 
       /*
-       * TambiÃƒÆ’Ã‚Â©n procesamos cuando la
-       * confirmaciÃƒÆ’Ã‚Â³n llega mediante
+       * También procesamos cuando la
+       * confirmación llega mediante
        * lenguaje natural.
        */
       const processed =
