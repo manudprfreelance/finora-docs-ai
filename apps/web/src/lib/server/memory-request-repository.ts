@@ -43,6 +43,67 @@ export class MemoryRequestRepository
     );
   }
 
+  async findByCustomerId(
+    customerId: string,
+  ): Promise<StoredRequest[]> {
+    return Array.from(
+      this.requests.values(),
+    )
+      .filter(
+        (storedRequest) =>
+          storedRequest.requestState
+            .customer.customerId ===
+          customerId,
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            b.createdAt,
+          ).getTime() -
+          new Date(
+            a.createdAt,
+          ).getTime(),
+      );
+  }
+
+  async findManualRequests(): Promise<
+    StoredRequest[]
+  > {
+    return Array.from(
+      this.requests.values(),
+    )
+      .filter((storedRequest) => {
+        const requestState =
+          storedRequest.requestState;
+
+        const isManualStatus =
+          requestState.status ===
+            "pending_manual_processing" ||
+          requestState.status ===
+            "manual_processing";
+
+        const isManualDocument =
+          requestState.documentType ===
+            "unknown" &&
+          requestState.manualRequest !==
+            null;
+
+        return (
+          isManualStatus &&
+          isManualDocument
+        );
+      })
+      .sort(
+        (a, b) =>
+          new Date(
+            a.createdAt,
+          ).getTime() -
+          new Date(
+            b.createdAt,
+          ).getTime(),
+      );
+  }
+
   async save(
     requestId: string,
     requestState: DocumentRequest,
@@ -119,6 +180,50 @@ export class MemoryRequestRepository
     const storedRequest: StoredRequest = {
       requestId,
       requestState: processingState,
+      createdAt:
+        existingRequest.createdAt,
+      updatedAt:
+        new Date().toISOString(),
+    };
+
+    this.requests.set(
+      requestId,
+      storedRequest,
+    );
+
+    return storedRequest;
+  }
+
+  async claimForCancellation(
+    requestId: string,
+    cancelledState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const existingRequest =
+      this.requests.get(requestId);
+
+    if (!existingRequest) {
+      return null;
+    }
+
+    const cancellableStatuses:
+      DocumentRequest["status"][] = [
+        "collecting_information",
+        "ready_for_confirmation",
+        "confirmed",
+        "pending_manual_processing",
+      ];
+
+    if (
+      !cancellableStatuses.includes(
+        existingRequest.requestState.status,
+      )
+    ) {
+      return null;
+    }
+
+    const storedRequest: StoredRequest = {
+      requestId,
+      requestState: cancelledState,
       createdAt:
         existingRequest.createdAt,
       updatedAt:

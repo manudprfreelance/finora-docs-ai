@@ -52,6 +52,15 @@ services:
     volumes:
       - finora_minio_data:/data
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: finora-mailpit
+    restart: unless-stopped
+
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
   web:
     build:
       context: ../apps/web
@@ -66,6 +75,8 @@ services:
       minio:
         condition: service_started
       gotenberg:
+        condition: service_started
+      mailpit:
         condition: service_started
 
     environment:

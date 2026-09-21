@@ -1,5 +1,6 @@
 import {
   GetObjectCommand,
+  PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 
@@ -9,6 +10,14 @@ interface StoredDocument {
   fileName: string;
   bucket: string;
   objectKey: string;
+}
+
+export interface StoredManualDocumentMetadata {
+  bucket: string;
+  objectKey: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 
 const DOCUMENT_BUCKET =
@@ -82,6 +91,19 @@ function buildSwiftConfirmationObjectKey(
     "swift-confirmations",
     requestId,
     `swift-confirmation-${requestId}.pdf`,
+  ].join("/");
+}
+
+function buildManualDocumentObjectKey(
+  customerId: string,
+  requestId: string,
+): string {
+  return [
+    "customers",
+    customerId,
+    "manual-documents",
+    requestId,
+    `manual-document-${requestId}.pdf`,
   ].join("/");
 }
 
@@ -171,6 +193,82 @@ async function getStoredPdf(
   }
 }
 
+export async function storeManualDocumentPdf(
+  customerId: string,
+  requestId: string,
+  body: Uint8Array,
+): Promise<StoredManualDocumentMetadata> {
+  if (!customerId.trim()) {
+    throw new Error(
+      "Customer ID is required.",
+    );
+  }
+
+  if (!requestId.trim()) {
+    throw new Error(
+      "Request ID is required.",
+    );
+  }
+
+  if (body.byteLength === 0) {
+    throw new Error(
+      "The manual document is empty.",
+    );
+  }
+
+  const objectKey =
+    buildManualDocumentObjectKey(
+      customerId,
+      requestId,
+    );
+
+  const fileName =
+    `manual-document-${requestId}.pdf`;
+
+  const client =
+    getS3Client();
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket:
+        DOCUMENT_BUCKET,
+
+      Key:
+        objectKey,
+
+      Body:
+        body,
+
+      ContentType:
+        "application/pdf",
+
+      ContentLength:
+        body.byteLength,
+
+      Metadata: {
+        customerId,
+        requestId,
+        processingMode: "manual",
+      },
+    }),
+  );
+
+  return {
+    bucket:
+      DOCUMENT_BUCKET,
+
+    objectKey,
+
+    fileName,
+
+    contentType:
+      "application/pdf",
+
+    size:
+      body.byteLength,
+  };
+}
+
 export async function getAccountStatementPdf(
   customerId: string,
   requestId: string,
@@ -216,5 +314,21 @@ export async function getSwiftConfirmationPdf(
   return getStoredPdf(
     objectKey,
     `swift-confirmation-${requestId}.pdf`,
+  );
+}
+
+export async function getManualDocumentPdf(
+  customerId: string,
+  requestId: string,
+): Promise<StoredDocument | null> {
+  const objectKey =
+    buildManualDocumentObjectKey(
+      customerId,
+      requestId,
+    );
+
+  return getStoredPdf(
+    objectKey,
+    `manual-document-${requestId}.pdf`,
   );
 }

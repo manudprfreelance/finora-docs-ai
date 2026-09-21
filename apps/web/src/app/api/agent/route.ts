@@ -40,6 +40,10 @@ import {
 } from "@/lib/server/request-processing-dispatcher";
 
 import {
+  manualRequestService,
+} from "@/lib/server/n8n-manual-request-service";
+
+import {
   OpenAIProvider,
 } from "@/lib/server/ai/openai-provider";
 
@@ -837,17 +841,176 @@ async function registerConfirmedManualRequest(
     },
   );
 
+  return pendingManualRequest;
+}
+
+async function dispatchManualRequest(
+  requestId: string,
+  requestState: DocumentRequest,
+) {
+  const dispatchResult =
+    await manualRequestService.dispatch(
+      requestId,
+      requestState,
+    );
+
+  if (
+    dispatchResult.status === "accepted"
+  ) {
+    const manualProcessingRequest: DocumentRequest = {
+      ...requestState,
+      status: "manual_processing",
+    };
+
+    await saveRequestSession(
+      requestId,
+      manualProcessingRequest,
+    );
+
+    await createRequestEvent(
+      requestId,
+      "manual_request_dispatched",
+      {
+        documentType:
+          manualProcessingRequest.documentType,
+        requestedDocumentDescription:
+          manualProcessingRequest.manualRequest
+            ?.requestedDocumentDescription ??
+          null,
+        customerId:
+          manualProcessingRequest.customer
+            .customerId,
+        provider:
+          dispatchResult.provider,
+        externalReference:
+          dispatchResult.externalReference,
+        acceptedAt:
+          dispatchResult.acceptedAt,
+        previousStatus:
+          "pending_manual_processing",
+        status:
+          "manual_processing",
+      },
+    );
+
+    return {
+      requestState:
+        manualProcessingRequest,
+
+      nextAction: {
+        type:
+          "request_manual_processing",
+        message:
+          "Solicitud enviada correctamente para su tramitación manual. Un gestor deberá preparar el documento antes de que quede disponible.",
+      },
+    };
+  }
+
+  await createRequestEvent(
+    requestId,
+    "manual_request_dispatch_failed",
+    {
+      documentType:
+        requestState.documentType,
+      requestedDocumentDescription:
+        requestState.manualRequest
+          ?.requestedDocumentDescription ??
+        null,
+      customerId:
+        requestState.customer.customerId,
+      provider:
+        dispatchResult.provider,
+      error:
+        dispatchResult.error,
+      status:
+        requestState.status,
+    },
+  );
+
   return {
-    requestState:
-      pendingManualRequest,
+    requestState,
 
     nextAction: {
       type:
         "request_pending_manual_processing",
       message:
-        "Solicitud registrada correctamente. Este documento requiere tramitación manual y ha quedado pendiente de gestión.",
+        "La solicitud ha quedado registrada, pero no ha podido enviarse al circuito de tramitación manual. Permanece pendiente para evitar perderla.",
     },
   };
+}
+
+async function registerAndDispatchConfirmedManualRequest(
+  requestId: string,
+  requestState: DocumentRequest,
+) {
+  const pendingManualRequest =
+    await registerConfirmedManualRequest(
+      requestId,
+      requestState,
+    );
+
+  return dispatchManualRequest(
+    requestId,
+    pendingManualRequest,
+  );
+}
+
+async function getExistingManualConfirmationResult(
+  requestId: string,
+) {
+  const latestRequest =
+    await getRequestSession(
+      requestId,
+    );
+
+  if (!latestRequest) {
+    return null;
+  }
+
+  const requestState =
+    latestRequest.requestState;
+
+  if (
+    !isManualDocumentRequest(
+      requestState,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    requestState.status ===
+    "manual_processing"
+  ) {
+    return {
+      requestState,
+
+      nextAction: {
+        type:
+          "request_manual_processing",
+        message:
+          "La solicitud ya ha sido enviada para su tramitación manual. No se ha iniciado un envío duplicado.",
+      },
+    };
+  }
+
+  if (
+    requestState.status ===
+    "pending_manual_processing"
+  ) {
+    return {
+      requestState,
+
+      nextAction: {
+        type:
+          "request_pending_manual_processing",
+        message:
+          "La solicitud manual ya está registrada y permanece pendiente de tramitación. No se ha iniciado un envío duplicado.",
+      },
+    };
+  }
+
+  return null;
 }
 
 async function processJustConfirmedRequest(
@@ -1097,7 +1260,7 @@ export async function POST(
             )
           ) {
             const manualResult =
-              await registerConfirmedManualRequest(
+              await registerAndDispatchConfirmedManualRequest(
                 storedRequest.requestId,
                 confirmationClaim.requestState,
               );
@@ -1125,6 +1288,36 @@ export async function POST(
                 manualResult.nextAction,
             });
           }
+        }
+
+        const existingManualResult =
+          await getExistingManualConfirmationResult(
+            storedRequest.requestId,
+          );
+
+        if (existingManualResult) {
+          return NextResponse.json({
+            requestId:
+              storedRequest.requestId,
+
+            receivedMessage: null,
+
+            agent: {
+              mode:
+                "deterministic",
+              provider:
+                "finora-engine",
+              model: null,
+            },
+
+            extraction: null,
+
+            requestState:
+              existingManualResult.requestState,
+
+            nextAction:
+              existingManualResult.nextAction,
+          });
         }
 
         /*
@@ -1790,7 +1983,7 @@ Return exactly this JSON shape:
           )
         ) {
           const manualResult =
-            await registerConfirmedManualRequest(
+            await registerAndDispatchConfirmedManualRequest(
               storedRequest.requestId,
               confirmationClaim.requestState,
             );
@@ -1821,6 +2014,39 @@ Return exactly this JSON shape:
               manualResult.nextAction,
           });
         }
+      }
+
+      const existingManualResult =
+        await getExistingManualConfirmationResult(
+          storedRequest.requestId,
+        );
+
+      if (existingManualResult) {
+        return NextResponse.json({
+          requestId:
+            storedRequest.requestId,
+
+          receivedMessage:
+            message,
+
+          agent: {
+            mode: "ai",
+            provider:
+              response.provider,
+            model:
+              response.model,
+            usage:
+              response.usage,
+          },
+
+          extraction,
+
+          requestState:
+            existingManualResult.requestState,
+
+          nextAction:
+            existingManualResult.nextAction,
+        });
       }
 
       /*

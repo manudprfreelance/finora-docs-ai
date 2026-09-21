@@ -21,6 +21,18 @@ export async function getRequestSession(
   );
 }
 
+export async function getRequestSessionsByCustomerId(
+  customerId: string,
+) {
+  return requestRepository.findByCustomerId(
+    customerId,
+  );
+}
+
+export async function getManualRequestSessions() {
+  return requestRepository.findManualRequests();
+}
+
 export async function saveRequestSession(
   requestId: string,
   requestState: DocumentRequest,
@@ -48,6 +60,16 @@ export async function claimRequestForProcessing(
   return requestRepository.claimForProcessing(
     requestId,
     processingState,
+  );
+}
+
+export async function claimRequestForCancellation(
+  requestId: string,
+  cancelledState: DocumentRequest,
+) {
+  return requestRepository.claimForCancellation(
+    requestId,
+    cancelledState,
   );
 }
 

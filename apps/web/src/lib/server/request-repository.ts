@@ -16,6 +16,10 @@ export interface RequestRepository {
     requestId: string,
   ): Promise<StoredRequest | null>;
 
+  findByCustomerId(
+    customerId: string,
+  ): Promise<StoredRequest[]>;
+
   save(
     requestId: string,
     requestState: DocumentRequest,
@@ -29,6 +33,11 @@ export interface RequestRepository {
   claimForProcessing(
     requestId: string,
     processingState: DocumentRequest,
+  ): Promise<StoredRequest | null>;
+
+  claimForCancellation(
+    requestId: string,
+    cancelledState: DocumentRequest,
   ): Promise<StoredRequest | null>;
 
   delete(

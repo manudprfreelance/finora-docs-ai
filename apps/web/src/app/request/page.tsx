@@ -1100,18 +1100,27 @@ export default function RequestPage() {
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={
-                  resetConversation
-                }
-                disabled={
-                  isRecoveringSession
-                }
-                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Nueva solicitud
-              </button>
+              <div className="flex items-center gap-3">
+                <a
+                  href="/documents"
+                  className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+                >
+                  Volver al espacio documental
+                </a>
+
+                <button
+                  type="button"
+                  onClick={
+                    resetConversation
+                  }
+                  disabled={
+                    isRecoveringSession
+                  }
+                  className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Nueva solicitud
+                </button>
+              </div>
             </div>
           </header>
 

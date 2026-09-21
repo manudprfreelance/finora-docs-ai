@@ -6,6 +6,7 @@ import {
 import {
   getAccountStatementPdf,
   getLoanAmortizationPdf,
+  getManualDocumentPdf,
   getSwiftConfirmationPdf,
 } from "@/lib/server/document-storage-service";
 
@@ -28,7 +29,10 @@ export async function GET(
       requestId,
     } = await context.params;
 
-    if (!requestId) {
+    const normalizedRequestId =
+      requestId.trim();
+
+    if (!normalizedRequestId) {
       return NextResponse.json(
         {
           error:
@@ -44,7 +48,7 @@ export async function GET(
 
     const storedRequest =
       await getRequestSession(
-        requestId,
+        normalizedRequestId,
       );
 
     if (!storedRequest) {
@@ -85,7 +89,12 @@ export async function GET(
       requestState.customer
         .customerId;
 
-    if (!customerId) {
+    if (
+      !customerId ||
+      requestState.customer
+        .resolutionStatus !==
+        "resolved"
+    ) {
       return NextResponse.json(
         {
           error:
@@ -108,7 +117,7 @@ export async function GET(
         document =
           await getAccountStatementPdf(
             customerId,
-            requestId,
+            normalizedRequestId,
           );
 
         break;
@@ -117,7 +126,7 @@ export async function GET(
         document =
           await getLoanAmortizationPdf(
             customerId,
-            requestId,
+            normalizedRequestId,
           );
 
         break;
@@ -126,10 +135,41 @@ export async function GET(
         document =
           await getSwiftConfirmationPdf(
             customerId,
-            requestId,
+            normalizedRequestId,
           );
 
         break;
+
+      case "unknown": {
+        const isManualRequest =
+          Boolean(
+            requestState.manualRequest
+              ?.requestedDocumentDescription
+              .trim(),
+          );
+
+        if (!isManualRequest) {
+          return NextResponse.json(
+            {
+              error:
+                "La solicitud no contiene un documento manual válido.",
+              code:
+                "MANUAL_DOCUMENT_NOT_CONFIGURED",
+            },
+            {
+              status: 400,
+            },
+          );
+        }
+
+        document =
+          await getManualDocumentPdf(
+            customerId,
+            normalizedRequestId,
+          );
+
+        break;
+      }
 
       default:
         return NextResponse.json(

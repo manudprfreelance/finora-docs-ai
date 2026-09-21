@@ -94,6 +94,58 @@ export class PostgresRequestRepository
     return mapRowToStoredRequest(row);
   }
 
+  async findByCustomerId(
+    customerId: string,
+  ): Promise<StoredRequest[]> {
+    const result =
+      await postgresPool.query<RequestSessionRow>(
+        `
+          SELECT
+            id,
+            request_state,
+            status,
+            created_at,
+            updated_at
+          FROM request_sessions
+          WHERE
+            request_state -> 'customer' ->> 'customerId' = $1
+          ORDER BY created_at DESC
+        `,
+        [customerId],
+      );
+
+    return result.rows.map(
+      mapRowToStoredRequest,
+    );
+  }
+
+  async findManualRequests(): Promise<StoredRequest[]> {
+    const result =
+      await postgresPool.query<RequestSessionRow>(
+        `
+          SELECT
+            id,
+            request_state,
+            status,
+            created_at,
+            updated_at
+          FROM request_sessions
+          WHERE
+            status IN (
+              'pending_manual_processing',
+              'manual_processing'
+            )
+            AND request_state ->> 'documentType' = 'unknown'
+            AND request_state -> 'manualRequest' IS NOT NULL
+          ORDER BY created_at ASC
+        `,
+      );
+
+    return result.rows.map(
+      mapRowToStoredRequest,
+    );
+  }
+
   async save(
     requestId: string,
     requestState: DocumentRequest,
@@ -192,6 +244,47 @@ export class PostgresRequestRepository
         [
           requestId,
           JSON.stringify(processingState),
+        ],
+      );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return mapRowToStoredRequest(row);
+  }
+
+  async claimForCancellation(
+    requestId: string,
+    cancelledState: DocumentRequest,
+  ): Promise<StoredRequest | null> {
+    const result =
+      await postgresPool.query<RequestSessionRow>(
+        `
+          UPDATE request_sessions
+          SET
+            request_state = $2::jsonb,
+            status = 'cancelled',
+            updated_at = NOW()
+          WHERE id = $1
+            AND status IN (
+              'collecting_information',
+              'ready_for_confirmation',
+              'confirmed',
+              'pending_manual_processing'
+            )
+          RETURNING
+            id,
+            request_state,
+            status,
+            created_at,
+            updated_at
+        `,
+        [
+          requestId,
+          JSON.stringify(cancelledState),
         ],
       );
 

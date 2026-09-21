@@ -13,7 +13,8 @@ export type RequestStatus =
   | "pending_manual_processing"
   | "manual_processing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type CustomerResolutionStatus =
   | "unresolved"
